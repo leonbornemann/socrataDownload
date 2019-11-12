@@ -16,8 +16,4 @@ object SocrataCrawlMain extends App {
   new File(metadataResultDir).mkdirs()
   new File(urlFile).mkdirs()
   new SocrataMetadataCrawler(metadataResultDir).crawl(urlFile)
-
-
-
-
 }

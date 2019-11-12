@@ -1,15 +1,18 @@
 package de.hpi.dataset_versioning.crawl
 
+import java.io.File
+
 import scala.io.Source
 
 object URLAnalysis extends App {
 
-  val a = Source.fromFile("/home/leon/data/dataset_versioning/socrata/sampleToCrawl2.txt")
-    .getLines()
-  val b = a.map(url => {
-    val tokens = url.split("/")
-    tokens(tokens.size-1)
-  })
-  println(b.toSet.size)
-
+  val fromServer = "/home/leon/data/dataset_versioning/socrata/fromServer/urls"
+  val updated = "/home/leon/data/dataset_versioning/socrata/urls/2019-10-30"
+  val urlAfterUpdate = new File(updated).listFiles().flatMap(Source.fromFile(_).getLines().toSet).toSet
+  println(urlAfterUpdate.size)
+  val allInServer = new File(fromServer).listFiles().flatMap(f => f.listFiles().flatMap(Source.fromFile(_).getLines().toSet)).toSet
+  val individualSizes = new File(fromServer).listFiles().map(f => (f.getName,f.listFiles().flatMap(Source.fromFile(_).getLines().toSet).size)).toSet
+  println(individualSizes)
+  println(allInServer.size)
+  println(urlAfterUpdate.diff(allInServer).size)
 }

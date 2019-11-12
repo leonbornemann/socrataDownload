@@ -42,6 +42,19 @@ class SocrataMetadataCrawler(metadataResultDir:String) extends StrictLogging{
     extractLastAssetID(resultsArray)
   }
 
+  def searchTest() = {
+    val url1 = s"https://api.us.socrata.com/api/catalog/v1?only=dataset&limit=20000"
+    val resultsArray1: JsonArray = getResultsFromURL(url1)
+    val ids = extractAssetIds(resultsArray1)
+    println(ids.sorted.head)
+    logger.trace("Waiting 10 seconds to be polite")
+    Thread.sleep(2000)
+    val resultsArray2: JsonArray = getResultsFromURL(url1)
+    val ids2 = extractAssetIds(resultsArray2)
+    println(ids.toSet.intersect(ids2.toSet).size)
+    println()
+  }
+
   def deepScrollingTest() = {
     var limit = 10000
     var done = false
@@ -85,9 +98,14 @@ class SocrataMetadataCrawler(metadataResultDir:String) extends StrictLogging{
     var done = false
     var batchID = 0
     val topDomainsToURLS = new mutable.HashMap[String,mutable.ArrayBuffer[String]]()
-    var lastAssetID = getFirstScrollID() //todo:try different seed scroll-ids
+    //224n-rp2d
+    var lastAssetID = "0000-0000"
+    //var lastAssetID = "224n-rp2d"
+    //var lastAssetID = "4v23-4444"
+    //var lastAssetID = "f2xe-wr7z"//getFirstScrollID() //todo:try different seed scroll-ids
+    println(lastAssetID)
     logger.trace("Waiting 10 seconds to be polite")
-    Thread.sleep(10000)
+    //Thread.sleep(10000)
     while(done!=true) {
       //fetch from URL:
       logger.trace("Fetching batch {}", batchID)
@@ -97,10 +115,9 @@ class SocrataMetadataCrawler(metadataResultDir:String) extends StrictLogging{
       logger.trace("Processing {} dataset metadata objects",{resultsArray.size()})
       if (resultsArray.size() != 0) {
         //save metadata and extract content:
-        saveMetadata(resultsArray, batchID)
-        val urls = extractDatasetURLS(resultsArray)
+        val ids = extractAssetIds(resultsArray)
+        addRequestResult(batchID, topDomainsToURLS, resultsArray)
         lastAssetID = extractLastAssetID(resultsArray)
-        saveURLS(urls, topDomainsToURLS)
         if (resultsArray.size() < limit) {
           done = true
         }
@@ -111,6 +128,7 @@ class SocrataMetadataCrawler(metadataResultDir:String) extends StrictLogging{
         done = true
       }
     }
+    println(topDomainsToURLS.values.map(_.toSet.size).sum)
     topDomainsToURLS.foreach{case (domain,urls) => {
       logger.trace(s"saving URLs for $domain")
       logger.trace(s"num urls: ${urls.size}, distinct: ${urls.toSet.size}")
@@ -120,7 +138,13 @@ class SocrataMetadataCrawler(metadataResultDir:String) extends StrictLogging{
     }}
   }
 
-  def saveMetadata(curResult: JsonArray,batchID:Int) = {
+  private def addRequestResult(batchID: Int, topDomainsToURLS: mutable.HashMap[String, ArrayBuffer[String]], resultsArray: JsonArray) = {
+    saveMetadata(resultsArray, batchID)
+    val urls = extractDatasetURLS(resultsArray)
+    saveURLS(urls, topDomainsToURLS)
+  }
+
+  def saveMetadata(curResult: JsonArray, batchID:Int) = {
     val outFile = metadataResultDir + "/batch_" + batchID + "_metadata.json"
     val pr = new PrintWriter(outFile)
     pr.println(curResult)

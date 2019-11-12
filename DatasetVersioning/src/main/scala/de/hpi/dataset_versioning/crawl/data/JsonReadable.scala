@@ -2,6 +2,7 @@ package de.hpi.dataset_versioning.crawl.data
 
 import java.io.{File, FileInputStream}
 
+import de.hpi.dataset_versioning.crawl.data.metadata.Provenance
 import org.json4s.jackson.JsonMethods.parse
 import org.json4s.{DefaultFormats, _}
 import org.json4s.ext.EnumNameSerializer

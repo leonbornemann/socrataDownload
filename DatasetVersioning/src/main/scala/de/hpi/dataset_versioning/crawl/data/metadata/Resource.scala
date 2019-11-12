@@ -1,6 +1,4 @@
-package de.hpi.dataset_versioning.crawl.data
-
-import java.sql.Timestamp
+package de.hpi.dataset_versioning.crawl.data.metadata
 
 case class Resource(name:String, id:String,
                     description:Option[String],
@@ -18,7 +16,7 @@ case class Resource(name:String, id:String,
                     columns_format:Array[Any], //TODO: maybe make this more precise
                     parent_fxf:Array[String], //contains ids of other datasets
                     provenance:Provenance.Value,
-                    download_count:Long
+                    download_count:Option[Long]
                    ) {
 
 }

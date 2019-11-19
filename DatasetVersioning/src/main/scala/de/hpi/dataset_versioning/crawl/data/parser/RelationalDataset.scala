@@ -1,71 +1,70 @@
 package de.hpi.dataset_versioning.crawl.data.parser
 
-import com.google.gson.{JsonArray, JsonObject, JsonPrimitive}
+import com.google.gson.{JsonArray, JsonElement, JsonNull, JsonObject, JsonPrimitive}
 
 import scala.collection
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 import scala.collection.JavaConverters._
 
-class RelationalDataset(firstObj:JsonObject, val rows:ArrayBuffer[Seq[JsonPrimitive]]=ArrayBuffer()) {
+class RelationalDataset(val rows:ArrayBuffer[Seq[JsonElement]]=ArrayBuffer()) {
+
+  val nestedLevelSeparator = "_"
 
   var colNames = IndexedSeq[String]()
-
-  def extractNestedSchema(firstObj: JsonObject): IndexedSeq[String] = extractNestedSchema("",firstObj)
-
-  def extractNestedSchema(prefix:String,firstObj: JsonObject): IndexedSeq[String] = {
-    val keyPrefix = if(prefix.isEmpty) "" else prefix + "_"
-    firstObj.keySet().asScala.flatMap(k => {
-      firstObj.get(k) match { //TODO: fix switch case
-        case e:JsonArray => throw new MemberIsArrayException
-        case e:JsonPrimitive => IndexedSeq(keyPrefix + k)
-        case e:JsonObject => extractNestedSchema(keyPrefix + "_" + k, firstObj.get(k).getAsJsonObject)
-        case _ => throw new AssertionError("unmatched case")
-      }
-    }).toIndexedSeq.sorted
-  }
-
-  if(firstObj!=null)
-    colNames = extractNestedSchema(firstObj)
-  private val colNameSet = colNames.toSet
+  private var colNameSet = Set[String]()
   private var containedNestedObjects = false
   private var erroneous = false
 
-  def isEmpty = colNames.isEmpty || rows.isEmpty
 
-  def appendRow(obj: JsonObject) = {
-    if(extractNestedSchema(obj).toSet!=colNameSet) {
-      erroneous=true
-      println()
-      println(extractNestedSchema(obj).sorted)
-      println(colNameSet.toSeq.sorted)
-      println()
-      throw new SchemaMismatchException() //TODO: introduce new values and set all of the other ones to null
-    }
-    val row = extractScalarAttributes(obj)
-    rows +=row
+  def setSchema(firstObj:JsonObject) = {
+    colNames = extractNestedKeyValuePairs(firstObj)
+        .map(_._1)
+    colNameSet = colNames.toSet
   }
 
-  private def extractScalarAttributes(obj: JsonObject):IndexedSeq[JsonPrimitive] = {
-    val row = obj.keySet().asScala.map(k => {
-      val i = colNames.indexOf(k)
-      (i, k)
-    }).toIndexedSeq.sortBy(_._1)
-      .flatMap { case (_, k) => {
-        val curValue = obj.get(k)
-        if (!curValue.isJsonPrimitive) {
-          //we can try to resolve objects recursively if they do not contain any arrays
-          containedNestedObjects=true
-          if (curValue.isJsonArray) {
-            erroneous=true
-            throw new MemberIsArrayException()
-          }
-          assert(curValue.isJsonObject)
-          extractScalarAttributes(curValue.getAsJsonObject)
-        } else {
-          IndexedSeq(curValue.getAsJsonPrimitive)
+  def setSchema(array:JsonArray) = {
+    val it = array.iterator()
+    val finalSchema = mutable.HashSet[String]()
+    while (it.hasNext) {
+      val curObj = it.next().getAsJsonObject
+      val schema = extractNestedKeyValuePairs(curObj)
+      finalSchema ++= schema.map(_._1)
+    }
+    colNames = finalSchema.toIndexedSeq.sorted
+    colNameSet = finalSchema.toSet
+  }
+
+  private def extractNestedKeyValuePairs(firstObj: JsonObject): IndexedSeq[(String,JsonPrimitive)] = extractNestedKeyValuePairs("",firstObj)
+
+  private def extractNestedKeyValuePairs(prefix:String, firstObj: JsonObject): IndexedSeq[(String,JsonPrimitive)] = {
+    val keyPrefix = if(prefix.isEmpty) "" else prefix + nestedLevelSeparator
+    firstObj.keySet().asScala.flatMap(k => {
+      firstObj.get(k) match { //TODO: fix switch case
+        case e:JsonArray => {
+          erroneous = true
+          throw new MemberIsArrayException
         }
-      }}
-    row
+        case e:JsonPrimitive => IndexedSeq((keyPrefix + k,e))
+        case e:JsonObject => {
+          containedNestedObjects = true
+          extractNestedKeyValuePairs(keyPrefix + nestedLevelSeparator + k, firstObj.get(k).getAsJsonObject)
+        }
+        case _ => throw new AssertionError("unmatched case")
+      }
+    }).toIndexedSeq.sortBy(_._1)
+  }
+
+  def isEmpty = colNames.isEmpty || rows.isEmpty
+
+  def appendRow(obj: JsonObject,strictSchemaCompliance:Boolean = false) = {
+    val kvPairs = extractNestedKeyValuePairs(obj)
+      .toMap
+    if(!kvPairs.keySet.subsetOf(colNameSet) || (strictSchemaCompliance && kvPairs.keySet!=colNameSet)) {
+      erroneous=true
+      throw new SchemaMismatchException
+    }
+    val row = colNames.map(k => kvPairs.getOrElse(k,JsonNull.INSTANCE))
+    rows += row
   }
 }

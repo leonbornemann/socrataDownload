@@ -7,6 +7,7 @@ import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 import scala.collection.JavaConverters._
 
+//TODO: handle arrays and get attribute order!
 class RelationalDataset(val rows:ArrayBuffer[Seq[JsonElement]]=ArrayBuffer()) {
 
   val nestedLevelSeparator = "_"
@@ -14,6 +15,7 @@ class RelationalDataset(val rows:ArrayBuffer[Seq[JsonElement]]=ArrayBuffer()) {
   var colNames = IndexedSeq[String]()
   private var colNameSet = Set[String]()
   private var containedNestedObjects = false
+  var containsArrays = false
   private var erroneous = false
 
 
@@ -35,22 +37,25 @@ class RelationalDataset(val rows:ArrayBuffer[Seq[JsonElement]]=ArrayBuffer()) {
     colNameSet = finalSchema.toSet
   }
 
-  private def extractNestedKeyValuePairs(firstObj: JsonObject): IndexedSeq[(String,JsonPrimitive)] = extractNestedKeyValuePairs("",firstObj)
+  private def extractNestedKeyValuePairs(firstObj: JsonObject): IndexedSeq[(String,JsonElement)] = extractNestedKeyValuePairs("",firstObj)
 
-  private def extractNestedKeyValuePairs(prefix:String, firstObj: JsonObject): IndexedSeq[(String,JsonPrimitive)] = {
+  private def extractNestedKeyValuePairs(prefix:String, firstObj: JsonObject): IndexedSeq[(String,JsonElement)] = {
     val keyPrefix = if(prefix.isEmpty) "" else prefix + nestedLevelSeparator
     firstObj.keySet().asScala.flatMap(k => {
-      firstObj.get(k) match { //TODO: fix switch case
+      firstObj.get(k) match {
         case e:JsonArray => {
-          erroneous = true
-          throw new MemberIsArrayException
+          containsArrays = true
+          IndexedSeq((keyPrefix + k,e))
         }
         case e:JsonPrimitive => IndexedSeq((keyPrefix + k,e))
         case e:JsonObject => {
           containedNestedObjects = true
           extractNestedKeyValuePairs(keyPrefix + nestedLevelSeparator + k, firstObj.get(k).getAsJsonObject)
         }
-        case _ => throw new AssertionError("unmatched case")
+        case _ => {
+          erroneous = true
+          throw new AssertionError("unmatched case")
+        }
       }
     }).toIndexedSeq.sortBy(_._1)
   }

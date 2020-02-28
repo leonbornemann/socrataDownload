@@ -1,0 +1,11 @@
+package de.hpi.dataset_versioning.data.diff
+
+import de.hpi.dataset_versioning.io.IOService
+
+object DataDiffMain extends App {
+
+  IOService.socrataDir = args(0)
+  val diffCalculator = new DataDiffCalculator()
+  val versions = IOService.getSortedDatalakeVersions()
+  diffCalculator.calculateDataDiff(versions(0),versions(1))
+}

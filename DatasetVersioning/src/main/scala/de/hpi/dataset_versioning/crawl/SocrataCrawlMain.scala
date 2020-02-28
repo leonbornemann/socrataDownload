@@ -1,14 +1,7 @@
 package de.hpi.dataset_versioning.crawl
 
-import java.io.{File, PrintWriter, StringReader}
-import java.net.URL
-import java.time.{LocalDate, LocalDateTime}
-
-import com.google.gson.{JsonArray, JsonObject, JsonParser}
-import com.google.gson.stream.JsonReader
-
-import scala.collection.mutable
-import scala.io.Source
+import java.io.File
+import java.time.LocalDate
 
 object SocrataCrawlMain extends App {
   val metadataResultDir = args(0) + "/" + LocalDate.now() + "/"

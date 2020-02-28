@@ -1,10 +1,10 @@
 package de.hpi.dataset_versioning.crawl
 
-import java.io.{File, PrintWriter, StringReader}
+import java.io.{PrintWriter, StringReader}
 import java.net.URL
 
-import com.google.gson.{JsonArray, JsonParser}
 import com.google.gson.stream.JsonReader
+import com.google.gson.{JsonArray, JsonParser}
 import com.typesafe.scalalogging.StrictLogging
 
 import scala.collection.mutable

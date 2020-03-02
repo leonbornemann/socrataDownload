@@ -14,7 +14,7 @@ import scala.io.Source
 import scala.reflect.io.Directory
 import scala.sys.process._
 
-class DiffCalculator(/*workingDirectory: File,*/var diffDirectory:File=null) extends StrictLogging{
+class DiffCalculator() extends StrictLogging{
 
   def getLines(file: File) = Source.fromFile(file).getLines().toSet
 
@@ -24,46 +24,45 @@ class DiffCalculator(/*workingDirectory: File,*/var diffDirectory:File=null) ext
 
   def diffToOriginalName(diffFilename: String) = diffFilename.substring(0,diffFilename.lastIndexOf('.'))
 
-  /*def recreateFromDiff(previous: File, target:File) = {
-    val deleted = getLines(new File(DELETED))
-    val created = getLines(new File(CREATED))
-    //copy all created files:
-    diffs
+  def recreateFromDiff(version:LocalDate, externalTarget:Option[File] = None) = {
+    val uncompressedDiffDir = IOService.getUncompressedDiffDir(version)
+    val uncompressedPreviousVersionDir = IOService.getUncompressedDataDir(version.minusDays(1))
+    val target = if(externalTarget.isDefined) externalTarget.get else IOService.getUncompressedDataDir(version)
+    val processedFiles = scala.collection.mutable.HashSet[String]()
+    uncompressedDiffDir
       .listFiles()
       .foreach(f => {
         if(isDiffFile(f)){
+          //path the changed files
           val diffFilename = f.getName
           val originalName = diffToOriginalName(diffFilename)
-          val originalFilepath = FROM.getAbsolutePath + "/" + originalName
-          val toExecute = s"patch -o ${target.getAbsolutePath + "/" + originalName} $originalFilepath ${f.getAbsolutePath}"
+          processedFiles += originalName
+          val originalFilepath = uncompressedPreviousVersionDir.getAbsolutePath + "/" + originalName
+          val toExecute = s"patch --quiet -o ${target.getAbsolutePath + "/" + originalName} $originalFilepath ${f.getAbsolutePath}"
           toExecute! //TODO: deal with rejects!
-          //TODO assert file equality
         } else if(isDataFile(f)){
+          //copy all created files (they are in the diff):
           val toExecute = s"cp ${f.getAbsolutePath} ${target.getAbsolutePath}"
           toExecute!
-        } else{
+        } else if (f.getName=="deleted.meta") {
+          processedFiles ++= Source.fromFile(f).getLines()
+        }
+        else{
           println("skipping meta file " +f.getName)
         }
       })
-  }*/
+    //copy all unchanged files from the original directory
+    uncompressedPreviousVersionDir.listFiles()
+      .filter(f => !processedFiles.contains(f.getName))
+      .foreach(f => {
+        val toExecute = s"cp ${f.getAbsolutePath} ${target.getAbsolutePath}"
+        toExecute!
+      })
+    if(!externalTarget.isDefined)
+      IOService.compressDataFromWorkingDir(version)
+  }
 
-  /*def clearToAndFrom() = {
-    TO.listFiles().foreach(_.delete())
-    FROM.listFiles().foreach(_.delete())
-  }*/
-
-
-  /*val TO = new File(workingDirectory.getAbsolutePath + File.separator + "to" + File.separator)
-  val FROM = new File(workingDirectory.getAbsolutePath + File.separator + "from" + File.separator)
-  if(diffs==null)
-    diffs = new File(workingDirectory.getAbsolutePath + File.separator + "diffFiles" + File.separator)
-  val DELETED = diffs.getAbsolutePath + "/deleted.txt"
-  val CREATED = diffs.getAbsolutePath + "/created.txt"
-  TO.mkdirs()
-  FROM.mkdirs()
-  diffs.mkdir()*/
-
-  def deleteUnmeaningfulDiffs() = {
+  def deleteUnmeaningfulDiffs(diffDirectory:File) = {
     diffDirectory.listFiles()
       .filter(_.length()==0)
       .foreach(_.delete())
@@ -75,6 +74,7 @@ class DiffCalculator(/*workingDirectory: File,*/var diffDirectory:File=null) ext
     val namesFrom = filesFrom.map(f => (f.getName,f)).toMap
     val namesTo = filesTo.map(f => (f.getName,f)).toMap
     //diffs and deleted files:
+    val diffDirectory = IOService.getUncompressedDiffDir(to)
     assert(diffDirectory.exists() && diffDirectory.listFiles.size==0)
     val deleted = new PrintWriter(diffDirectory.getAbsolutePath + "/deleted.meta")
     val created = new PrintWriter(diffDirectory.getAbsolutePath + "/created.meta")
@@ -98,19 +98,19 @@ class DiffCalculator(/*workingDirectory: File,*/var diffDirectory:File=null) ext
       toExecute!
     })
     created.close()
-    deleteUnmeaningfulDiffs()
+    deleteUnmeaningfulDiffs(diffDirectory)
     //zip the resulting directory:
-    val toExecute = s"zip -q -r ${IOService.DIFF_DIR + "/" + diffDirectory.getName}.zip $diffDirectory"
-    toExecute!;
+    IOService.compressDiffFromWorkingDir(to)
     if(deleteUncompressed)
-      new Directory(diffDirectory).deleteRecursively()
+      IOService.clearUncompressedDiff(to)
+      //new Directory(diffDirectory).deleteRecursively()
   }
 
   def calculateDiff(version:LocalDate,deleteUncompressed:Boolean=true) = {
     logger.trace("calculating diff for {}",version)
     IOService.extractDataToWorkingDir(version)
     val previousVersion = version.minusDays(1)
-    assert(IOService.versionExists(previousVersion))
+    assert(IOService.compressedSnapshotExists(previousVersion))
     IOService.extractDataToWorkingDir(previousVersion)
     calculateAllDiffsFromUncompressed(previousVersion,version,deleteUncompressed)
   }

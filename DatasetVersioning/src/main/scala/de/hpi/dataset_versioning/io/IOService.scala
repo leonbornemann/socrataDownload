@@ -12,10 +12,15 @@ import de.hpi.dataset_versioning.data.metadata.DatasetMetadata
 import de.hpi.dataset_versioning.data.parser.JsonDataParser
 import de.hpi.dataset_versioning.matching.DatasetInstance
 
+import scala.sys.process._
 import scala.collection.mutable
 import scala.io.Source
+import scala.reflect.io.Directory
 
 object IOService extends StrictLogging{
+
+  def clearUncompressedSnapshot(date: LocalDate) = new Directory(getUncompressedDataDir(date)).deleteRecursively() //TODO: existance checks?
+  def clearUncompressedDiff(date: LocalDate) = new Directory(getUncompressedDiffDir(date)).deleteRecursively()
 
   def printSummary() = {
     logger.debug("Running socrata IO Service with the following configuration")
@@ -24,22 +29,21 @@ object IOService extends StrictLogging{
     logger.debug(s"Socrata Metadata directory: $METADATA_DIR")
     logger.debug(s"Socrata Diff directory: $DIFF_DIR")
     logger.debug(s"Compressed Snapshots (Checkpoints) available for: {}",getSortedZippedDatalakeSnapshots)
-    logger.debug(s"Compressed Diffs available for: {}",getSortedZippedDiffs)
     logger.debug(s"extracted (uncompressed) snapshots available for {}",getSortedUncompressedSnapshots)
+    logger.debug(s"Compressed Diffs available for: {}",getSortedZippedDiffs)
     logger.debug(s"extracted (uncompressed) diffs available for {}",getSortedUncompressedDiffs)
   }
 
+  def compressedSnapshotExists(date: LocalDate) = getCompressedDataFile(date).exists()
+  def compressedDiffExists(version: LocalDate) = getCompressedDiffFile(version).exists()
+  def uncompressedSnapshotExists(version: LocalDate) = getUncompressedDataDir(version).exists()
+  def uncompressedDiffExists(version: LocalDate) = getUncompressedDiffDir(version).exists()
 
   def versionExists(date: LocalDate) = getSortedDatalakeVersions.contains(date)
 
-  def diffExists(version: LocalDate) = {
-    val diffFile = getZippedDiffFileForDate(version)
-    diffFile.exists()
-  }
 
   def jsonFilenameFromID(id: String): String = id + ".json?"
   private val jsonParser = new JsonDataParser
-
 
   def loadDataset(prev: DatasetInstance) = {
     val subDirectory = new File(DATA_DIR_UNCOMPRESSED + prev.date.format(dateTimeFormatter) + "/")
@@ -67,15 +71,48 @@ object IOService extends StrictLogging{
     f.getName.split("\\.")(0)
   }
 
-  def getZippedDataFileForDate(date: LocalDate): File = new File(DATA_DIR + date.format(dateTimeFormatter) + ".zip")
-  def getZippedDiffFileForDate(date: LocalDate): File = new File(DIFF_DIR + date.format(dateTimeFormatter) + "_diff.zip")
-  def getDiffDirForDate(date: LocalDate): File = new File(DIFF_DIR + date.format(dateTimeFormatter) + "_diff")
-  def getUncompressedDiffDirForDate(date: LocalDate) = new File(DIFF_DIR_UNCOMPRESSED + date.format(dateTimeFormatter) + "_diff")
+  def getCompressedDataFile(date: LocalDate): File = new File(DATA_DIR + date.format(dateTimeFormatter) + ".zip")
+  def getCompressedDiffFile(date: LocalDate): File = new File(DIFF_DIR + date.format(dateTimeFormatter) + "_diff.zip")
+  //def getDiffDirForDate(date: LocalDate): File = new File(DIFF_DIR + date.format(dateTimeFormatter) + "_diff")
+  def getUncompressedDiffDir(date: LocalDate) = new File(DIFF_DIR_UNCOMPRESSED + date.format(dateTimeFormatter) + "_diff")
+  def getUncompressedDataDir(date: LocalDate) = new File(DATA_DIR_UNCOMPRESSED + date.format(dateTimeFormatter))
+
+  private def compressToFile(sourceDir: File,targetDir:File) = {
+    logger.debug(s"Compressing data from ${sourceDir.getAbsolutePath} to ${targetDir.getAbsolutePath}")
+    val toExecute = s"zip -q -r ${targetDir.getAbsolutePath + "/" + sourceDir.getName}.zip $sourceDir"
+    toExecute!;
+  }
+
+  def compressDataFromWorkingDir(version: LocalDate) = {
+    if(!compressedSnapshotExists(version))
+      compressToFile(getUncompressedDataDir(version),new File(DATA_DIR))
+    else{
+      logger.debug(s"skipping data compression of $version, because it already exists")
+    }
+  }
+
+  def compressDiffFromWorkingDir(version: LocalDate) = {
+    if(!compressedDiffExists(version))
+      compressToFile(getUncompressedDiffDir(version),new File(DIFF_DIR))
+    else{
+      logger.debug(s"skipping diff compression of $version, because it already exists")
+    }
+  }
+
+  def extractDiffToWorkingDir(date: LocalDate) = {
+    val zippedDiffFile: File = getCompressedDiffFile(date)
+    val subDirectory = new File(DIFF_DIR_UNCOMPRESSED + filenameWithoutFiletype(zippedDiffFile))
+    extractZipFile(zippedDiffFile,subDirectory)
+  }
 
   def extractDataToWorkingDir(date: LocalDate): Set[File] = {
-    val zipFile: File = getZippedDataFileForDate(date)
+    val zipFile: File = getCompressedDataFile(date)
     val subDirectory = new File(DATA_DIR_UNCOMPRESSED + filenameWithoutFiletype(zipFile))
-    if(subDirectory.exists()){
+    extractZipFile(zipFile, subDirectory)
+  }
+
+  private def extractZipFile(zipFile: File, subDirectory: File) = {
+    if (subDirectory.exists()) {
       logger.warn(s"subdirectory ${subDirectory.getAbsolutePath} already exists, skipping .zip extraction")
       subDirectory.listFiles().toSet
     } else {

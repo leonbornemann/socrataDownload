@@ -7,5 +7,6 @@ object DataDiffMain extends App {
   IOService.socrataDir = args(0)
   val diffCalculator = new DataDiffCalculator()
   val versions = IOService.getSortedDatalakeVersions()
-  diffCalculator.calculateDataDiff(versions(0),versions(1))
+  //diffCalculator.calculateDataDiff(versions(0),versions(1))
+  diffCalculator.aggregateAllDataDiffs()
 }

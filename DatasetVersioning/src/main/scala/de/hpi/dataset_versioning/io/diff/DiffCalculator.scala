@@ -110,8 +110,10 @@ class DiffCalculator() extends StrictLogging{
     logger.trace("calculating diff for {}",version)
     IOService.extractDataToWorkingDir(version)
     val previousVersion = version.minusDays(1)
-    assert(IOService.compressedSnapshotExists(previousVersion))
-    IOService.extractDataToWorkingDir(previousVersion)
+    if(!IOService.uncompressedSnapshotExists(previousVersion)){
+      assert(IOService.compressedSnapshotExists(previousVersion))
+      IOService.extractDataToWorkingDir(previousVersion)
+    }
     calculateAllDiffsFromUncompressed(previousVersion,version,deleteUncompressed)
   }
 

@@ -30,6 +30,11 @@ class DiffManager(daysBetweenCheckpoints:Int=7) extends StrictLogging{
           IOService.clearUncompressedSnapshot(version.minusDays(2))
           IOService.clearUncompressedDiff(version.minusDays(2))
         }
+        if(IOService.uncompressedSnapshotExists(version.minusDays(3))){
+          //happens if we passed a checkpoint
+          IOService.clearUncompressedSnapshot(version.minusDays(3))
+          IOService.clearUncompressedDiff(version.minusDays(3))
+        }
         logger.debug(s"Cleaning up temporary Directory")
         IOUtil.clearDirectoryContent(tmpDirectory)
       }
@@ -43,7 +48,9 @@ class DiffManager(daysBetweenCheckpoints:Int=7) extends StrictLogging{
   def calculateDiff(version:LocalDate) = {
     if(!IOService.compressedDiffExists(version)){
       val diffDir = IOService.getUncompressedDiffDir(version)
-      assert(!diffDir.exists())
+      if(diffDir.exists()){
+        IOUtil.clearDirectoryContent(diffDir)
+      }
       diffDir.mkdirs()
       diffCalculator.calculateDiff(version)
     } else{

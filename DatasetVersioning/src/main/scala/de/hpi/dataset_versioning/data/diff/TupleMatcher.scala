@@ -1,4 +1,4 @@
-package de.hpi.dataset_versioning.data
+package de.hpi.dataset_versioning.data.diff
 
 import com.google.gson.JsonElement
 import com.typesafe.scalalogging.StrictLogging

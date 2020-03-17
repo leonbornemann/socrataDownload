@@ -8,6 +8,7 @@ import java.util.zip.{ZipEntry, ZipInputStream}
 import com.google.gson.JsonParser
 import com.google.gson.stream.JsonReader
 import com.typesafe.scalalogging.StrictLogging
+import de.hpi.dataset_versioning.data.LoadedRelationalDataset
 import de.hpi.dataset_versioning.data.metadata.DatasetMetadata
 import de.hpi.dataset_versioning.data.parser.JsonDataParser
 import de.hpi.dataset_versioning.matching.DatasetInstance
@@ -36,8 +37,8 @@ object IOService extends StrictLogging{
 
   def compressedSnapshotExists(date: LocalDate) = getCompressedDataFile(date).exists()
   def compressedDiffExists(version: LocalDate) = getCompressedDiffFile(version).exists()
-  def uncompressedSnapshotExists(version: LocalDate) = getUncompressedDataDir(version).exists()
-  def uncompressedDiffExists(version: LocalDate) = getUncompressedDiffDir(version).exists()
+  def uncompressedSnapshotExists(version: LocalDate) = getUncompressedDataDir(version).exists() && !getUncompressedDataDir(version).listFiles().isEmpty
+  def uncompressedDiffExists(version: LocalDate) = getUncompressedDiffDir(version).exists() && !getUncompressedDiffDir(version).listFiles().isEmpty
 
   def versionExists(date: LocalDate) = getSortedDatalakeVersions.contains(date)
 
@@ -45,15 +46,38 @@ object IOService extends StrictLogging{
   def jsonFilenameFromID(id: String): String = id + ".json?"
   private val jsonParser = new JsonDataParser
 
-  def loadDataset(prev: DatasetInstance) = {
-    val subDirectory = new File(DATA_DIR_UNCOMPRESSED + prev.date.format(dateTimeFormatter) + "/")
+  def loadDataset(datasetInstance: DatasetInstance,skipParseExceptions:Boolean = false) = {
+    val subDirectory = new File(DATA_DIR_UNCOMPRESSED + datasetInstance.date.format(dateTimeFormatter) + "/")
     if(!subDirectory.exists())
       throw new AssertionError(s"${subDirectory} must be extracted to working directory first")
-    val datasetFile = new File(subDirectory.getAbsolutePath + "/" + jsonFilenameFromID(prev.id))
+    val datasetFile = new File(subDirectory.getAbsolutePath + "/" + jsonFilenameFromID(datasetInstance.id))
     if(!datasetFile.exists())
-      throw new AssertionError(s"${prev.id} does not exist in ${prev.date}")
-    val ds = jsonParser.parseJsonFile(datasetFile)
-    ds
+      throw new AssertionError(s"${datasetInstance.id} does not exist in ${datasetInstance.date}")
+    if(skipParseExceptions){
+      val ds = jsonParser.tryParseJsonFile(datasetFile,datasetInstance.id,datasetInstance.date)
+      if(ds.isDefined) {
+        ds.get
+      }
+      else {
+        val ds = new LoadedRelationalDataset(datasetInstance.id,datasetInstance.date)
+        ds.erroneous=true
+        ds
+      }
+    } else{
+      jsonParser.parseJsonFile(datasetFile,datasetInstance.id,datasetInstance.date)
+    }
+  }
+
+  def tryLoadDataset(datasetInstance:DatasetInstance) = {
+    loadDataset(datasetInstance,true)
+  }
+
+  def tryLoadDataset(file:File,version:LocalDate) = {
+    loadDataset(new DatasetInstance(filenameToID(file),version),true)
+  }
+
+  def tryLoadDataset(id:String,version:LocalDate) = {
+    loadDataset(new DatasetInstance(id,version),true)
   }
 
   def fileNameToDate(f: File) = LocalDate.parse(filenameWithoutFiletype(f),dateTimeFormatter)
@@ -62,6 +86,7 @@ object IOService extends StrictLogging{
 
   def DATA_DIR = socrataDir + "/data/"
   def METADATA_DIR = socrataDir + "/metadata/"
+  def SNAPSHOT_METADATA_DIR = socrataDir + "/snapshotMetadata/"
   def DIFF_DIR = socrataDir + "/diff/"
   def WORKING_DIR:String = socrataDir + "/workingDir/"
   def DATA_DIR_UNCOMPRESSED = WORKING_DIR + "/snapshots/"
@@ -71,11 +96,24 @@ object IOService extends StrictLogging{
     f.getName.split("\\.")(0)
   }
 
+  //snapshotMetadataFiles:
+  def getJoinabilityGraphFile(date:LocalDate) = new File(SNAPSHOT_METADATA_DIR + date.format(dateTimeFormatter) + "/smallJoinabilityGraph.csv")
+  def getDatasetIdMappingFile(date: LocalDate) = new File(SNAPSHOT_METADATA_DIR + date.format(dateTimeFormatter) + "/dsIDMap.csv")
+  def getColumnIdMappingFile(date:LocalDate) = new File(SNAPSHOT_METADATA_DIR + date.format(dateTimeFormatter) + "/columnIDMap.csv")
+
   def getCompressedDataFile(date: LocalDate): File = new File(DATA_DIR + date.format(dateTimeFormatter) + ".zip")
   def getCompressedDiffFile(date: LocalDate): File = new File(DIFF_DIR + date.format(dateTimeFormatter) + "_diff.zip")
+
+  def createAndReturn(file: File) = {
+    if(!file.exists()) file.mkdirs()
+    file
+  }
+
   //def getDiffDirForDate(date: LocalDate): File = new File(DIFF_DIR + date.format(dateTimeFormatter) + "_diff")
-  def getUncompressedDiffDir(date: LocalDate) = new File(DIFF_DIR_UNCOMPRESSED + date.format(dateTimeFormatter) + "_diff")
-  def getUncompressedDataDir(date: LocalDate) = new File(DATA_DIR_UNCOMPRESSED + date.format(dateTimeFormatter))
+  def getUncompressedDiffDir(date: LocalDate) = createAndReturn(new File(DIFF_DIR_UNCOMPRESSED + date.format(dateTimeFormatter) + "_diff"))
+  def getUncompressedDataDir(date: LocalDate) = createAndReturn(new File(DATA_DIR_UNCOMPRESSED + date.format(dateTimeFormatter)))
+  def getSnapshotMetadataDir(date: LocalDate) = createAndReturn(new File(SNAPSHOT_METADATA_DIR + date.format(dateTimeFormatter)))
+
 
   private def compressToFile(sourceDir: File,targetDir:File) = {
     logger.debug(s"Compressing data from ${sourceDir.getAbsolutePath} to ${targetDir.getAbsolutePath}")

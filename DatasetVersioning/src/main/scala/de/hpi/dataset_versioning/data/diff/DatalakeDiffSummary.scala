@@ -29,9 +29,9 @@ class DatalakeDiffSummary(var numInserts:Int = 0,
     logger.trace(s"numDeletes: $numDeletes")
     logger.trace(s"numTupleChanges: $numTupleChanges")
     logger.trace(s"projections: $numProjections")
-    logger.trace(s"Column Inserts: $numInserts")
+    logger.trace(s"Column Inserts: $numColumnInserts")
     logger.trace(s"num Incomplete Diffs: $numDiffIncomplete")
-    logger.trace(s"$numDataChanges")
+    logger.trace(s"num Revisions with at least one change: $numDataChanges")
     logger.trace(s"------------------------------------------------")
   }
 

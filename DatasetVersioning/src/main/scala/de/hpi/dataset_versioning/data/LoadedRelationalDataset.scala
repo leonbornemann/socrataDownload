@@ -1,16 +1,69 @@
 package de.hpi.dataset_versioning.data
 
+import java.io.{File, PrintWriter}
+import java.time.LocalDate
+
 import com.google.gson._
 import com.typesafe.scalalogging.StrictLogging
+import de.hpi.dataset_versioning.data.`export`.Column
+import de.hpi.dataset_versioning.data.diff.TupleMatcher
 import de.hpi.dataset_versioning.data.parser.exceptions.SchemaMismatchException
+import de.hpi.dataset_versioning.io.IOService
 import de.hpi.dataset_versioning.util.TableFormatter
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 
-//TODO: get attribute order!
-class LoadedRelationalDataset(val rows:ArrayBuffer[Seq[JsonElement]]=ArrayBuffer()) extends StrictLogging{
+class LoadedRelationalDataset(id:String, version:LocalDate, val rows:ArrayBuffer[Seq[JsonElement]]=ArrayBuffer()) extends StrictLogging{
+
+  def getColumnObject(j: Int) = {
+    val values:ArrayBuffer[String] = getColContentAsString(j)
+    Column(id,version.format(IOService.dateTimeFormatter),colNames(j),values)
+  }
+
+  def exportToCSV(file:File) = {
+    val pr = new PrintWriter(file)
+    pr.println(toCSVLineString(colNames))
+    rows.foreach( r => {
+      pr.println(toCSVLineString(r.map(getCellValueAsString(_))))
+    })
+    pr.close()
+  }
+
+  private def toCSVLineString(line:Seq[String]) = {
+    line.map("\"" + _ + "\"").mkString(",")
+  }
+
+  def getCellValueAsString(jsonValue:JsonElement):String = {
+    jsonValue match {
+      case primitive: JsonPrimitive => primitive.getAsString
+      case array: JsonArray =>array.toString
+      case _: JsonNull => LoadedRelationalDataset.NULL_VALUE
+      case _ => throw new AssertionError("Switch case finds unhalndeld option")
+    }
+  }
+
+  def getColContentAsString(j: Int) = {
+    val values = scala.collection.mutable.ArrayBuffer[String]()
+    for (i <- 0 until rows.size) {
+      val jsonValue = rows(i)(j)
+      values+= getCellValueAsString(jsonValue)
+    }
+    values
+  }
+
+  def exportColumns(writer:PrintWriter, skipNumeric:Boolean = true) = {
+    if(!isEmpty && !erroneous) {
+      for (i <- 0 until rows(0).size) {
+        val col = getColumnObject(i)
+        if(!skipNumeric || !col.isNumeric) {
+          val json = col.toLSHEnsembleDomain.toJson()
+          writer.println(json)
+        }
+      }
+    }
+  }
 
   def calculateDataDiff(other: LoadedRelationalDataset) = {
     val myTuples = getTupleMultiSet
@@ -51,7 +104,7 @@ class LoadedRelationalDataset(val rows:ArrayBuffer[Seq[JsonElement]]=ArrayBuffer
   private var colNameSet = Set[String]()
   private var containedNestedObjects = false
   var containsArrays = false
-  private var erroneous = false
+  var erroneous = false
 
 
   def setSchema(firstObj:JsonObject) = {
@@ -107,4 +160,7 @@ class LoadedRelationalDataset(val rows:ArrayBuffer[Seq[JsonElement]]=ArrayBuffer
     val row = colNames.map(k => kvPairs.getOrElse(k,JsonNull.INSTANCE))
     rows += row
   }
+}
+object LoadedRelationalDataset {
+  val NULL_VALUE = ""
 }

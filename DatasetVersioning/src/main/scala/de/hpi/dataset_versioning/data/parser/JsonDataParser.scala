@@ -1,19 +1,21 @@
 package de.hpi.dataset_versioning.data.parser
 
 import java.io.{File, FileReader, PrintWriter, StringReader}
+import java.time.LocalDate
 
 import com.google.gson.{JsonParser, JsonPrimitive}
 import com.google.gson.stream.JsonReader
 import com.typesafe.scalalogging.StrictLogging
 import de.hpi.dataset_versioning.data.LoadedRelationalDataset
 import de.hpi.dataset_versioning.data.parser.exceptions.{ContainsArrayException, FirstElementNotObjectException, SchemaMismatchException}
+import de.hpi.dataset_versioning.io.IOService
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable
 
 class JsonDataParser extends StrictLogging{
 
-  def parseAllJson(dir:File) = {
+  def parseAllJson(dir:File,version:LocalDate) = {
     val files = dir.listFiles()
       .filter(_.getName.endsWith(".json?"))
     var firstElementNotObjectExceptionCount = 0
@@ -29,7 +31,7 @@ class JsonDataParser extends StrictLogging{
         printParseSummary(firstElementNotObjectExceptionCount, schemaMismatchExceptionCount, containsArrayException, numSuccessful, otherException, schemata)
       }
       try{
-        val ds = parseJsonFile(f)
+        val ds = parseJsonFile(f,IOService.filenameToID(f),version)
         schemata += ds.colNames.toSet
         numSuccessful+=1
       } catch{
@@ -55,15 +57,27 @@ class JsonDataParser extends StrictLogging{
     println(s"distinct Schemata:  ${schemata.size}")
   }
 
+  def tryParseJsonFile(file:File, id:String, version:LocalDate, strictSchema:Boolean=false, allowArrays:Boolean=true):Option[LoadedRelationalDataset] = {
+    try {
+      val ds = parseJsonFile(file,id:String, version, strictSchema, allowArrays)
+      Some(ds)
+    } catch {
+      case _:Throwable => {
+        logger.trace(s"Exception while trying to parse $file (version $version) - returning None")
+        None
+      }
+    }
+  }
+
   //TODO: include known metadata!
-  def parseJsonFile(file:File,strictSchema:Boolean=false,allowArrays:Boolean=true):LoadedRelationalDataset = {
+  def parseJsonFile(file:File, id:String, version:LocalDate, strictSchema:Boolean=false, allowArrays:Boolean=true):LoadedRelationalDataset = {
     val reader = new JsonReader(new FileReader(file))
     val parser = new JsonParser();
     val array = parser.parse(reader).getAsJsonArray
     val it = array.iterator()
     if(!it.hasNext){
       reader.close()
-      new LoadedRelationalDataset() //return empty dataset
+      new LoadedRelationalDataset(id,version) //return empty dataset
     } else {
       var dataset:LoadedRelationalDataset = null
       if(strictSchema) {
@@ -72,7 +86,7 @@ class JsonDataParser extends StrictLogging{
         if (!first.isJsonObject)
           throw new FirstElementNotObjectException()
         val obj = first.getAsJsonObject
-        val ds = new LoadedRelationalDataset()
+        val ds = new LoadedRelationalDataset(id,version)
         ds.setSchema(obj)
         ds.appendRow(obj)
         while (it.hasNext) {
@@ -83,7 +97,7 @@ class JsonDataParser extends StrictLogging{
         dataset = ds
       } else{
         //every row that does not have a field that other rows gets a missing value inserted
-        val ds = new LoadedRelationalDataset()
+        val ds = new LoadedRelationalDataset(id,version)
         ds.setSchema(array)
         while (it.hasNext) {
           val curObj = it.next().getAsJsonObject

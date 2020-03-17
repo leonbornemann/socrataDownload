@@ -9,11 +9,12 @@ import de.hpi.dataset_versioning.matching.MatchingRunner
 class DataDiffCalculator() extends StrictLogging{
 
   def aggregateAllDataDiffs(checkPointInterval:Int = 7) = {
-    val snapshots = IOService.getSortedUncompressedSnapshots
+    val snapshots = IOService.getSortedDatalakeVersions()
     val toCompare = snapshots.zipWithIndex
-      .filter(t => t._2 % checkPointInterval==0)
+      .filter(t => t._2 % checkPointInterval==0 && IOService.compressedSnapshotExists(t._1))
       .map(_._1)
     var totalSummary = new DatalakeDiffSummary()
+    logger.trace("Calculating Summary for {}",toCompare)
     for( i <- 1 until toCompare.size){
       val curSummary = calculateDataDiff(toCompare(i-1),toCompare(i))
       totalSummary.plus(curSummary)

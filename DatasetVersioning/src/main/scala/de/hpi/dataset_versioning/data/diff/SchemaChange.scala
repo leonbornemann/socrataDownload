@@ -1,4 +1,4 @@
-package de.hpi.dataset_versioning.data
+package de.hpi.dataset_versioning.data.diff
 
 import de.hpi.dataset_versioning.util.TableFormatter
 

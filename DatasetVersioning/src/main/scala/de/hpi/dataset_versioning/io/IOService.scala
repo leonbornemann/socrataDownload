@@ -100,6 +100,7 @@ object IOService extends StrictLogging{
   def getJoinabilityGraphFile(date:LocalDate) = new File(SNAPSHOT_METADATA_DIR + date.format(dateTimeFormatter) + "/smallJoinabilityGraph.csv")
   def getDatasetIdMappingFile(date: LocalDate) = new File(SNAPSHOT_METADATA_DIR + date.format(dateTimeFormatter) + "/dsIDMap.csv")
   def getColumnIdMappingFile(date:LocalDate) = new File(SNAPSHOT_METADATA_DIR + date.format(dateTimeFormatter) + "/columnIDMap.csv")
+  def getInferredProjectionFile(date: LocalDate) = new File(SNAPSHOT_METADATA_DIR + date.format(dateTimeFormatter) + "/inferredProjections.csv")
 
   def getCompressedDataFile(date: LocalDate): File = new File(DATA_DIR + date.format(dateTimeFormatter) + ".zip")
   def getCompressedDiffFile(date: LocalDate): File = new File(DIFF_DIR + date.format(dateTimeFormatter) + "_diff.zip")

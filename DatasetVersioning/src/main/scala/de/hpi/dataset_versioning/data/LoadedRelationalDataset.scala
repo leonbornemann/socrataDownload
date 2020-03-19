@@ -15,7 +15,47 @@ import scala.collection.JavaConverters._
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 
-class LoadedRelationalDataset(id:String, version:LocalDate, val rows:ArrayBuffer[Seq[JsonElement]]=ArrayBuffer()) extends StrictLogging{
+class LoadedRelationalDataset(val id:String, version:LocalDate, val rows:ArrayBuffer[Seq[JsonElement]]=ArrayBuffer()) extends StrictLogging{
+
+  def calculateColumnHashes() = {
+    columnHashes.clear()
+    columnHashes ++= (0 until ncols).map(i => {
+      (colNames(i),getColumnObject(i).valueMultiSet.hashCode())
+    })
+  }
+
+  /***
+   * Checks tuple set equality (assuming same order of columns in both datasets)
+   *
+   * @param other
+   * @return
+   */
+  def tupleSetEqual(other: LoadedRelationalDataset): Boolean = {
+    rows.toSet == other.rows.toSet
+  }
+
+
+  def getProjection(newID:String, columnRenames: IndexedSeq[(String,String)]) = {
+    val (myColNames,projectedColnames) = columnRenames.unzip
+    assert(myColNames.toSet.subsetOf(colNameSet))
+    val projected = new LoadedRelationalDataset(newID,version)
+    projected.colNames = projectedColnames
+    projected.colNameSet = projectedColnames.toSet
+    projected.containedNestedObjects = containedNestedObjects
+    projected.containsArrays = containsArrays
+    projected.erroneous = erroneous
+    val columnIndexMap = colNames.zipWithIndex.toMap
+    for(i <- 0 until rows.size) {
+      val newRow = ArrayBuffer[JsonElement]()
+      for (myName <- myColNames) {
+        val j = columnIndexMap(myName)
+        newRow += rows(i)(j)
+      }
+      projected.rows +=newRow
+    }
+    projected
+  }
+
 
   def getColumnObject(j: Int) = {
     val values:ArrayBuffer[String] = getColContentAsString(j)
@@ -105,6 +145,7 @@ class LoadedRelationalDataset(id:String, version:LocalDate, val rows:ArrayBuffer
   private var containedNestedObjects = false
   var containsArrays = false
   var erroneous = false
+  var columnHashes = mutable.HashMap[String,Int]()
 
 
   def setSchema(firstObj:JsonObject) = {
@@ -160,6 +201,9 @@ class LoadedRelationalDataset(id:String, version:LocalDate, val rows:ArrayBuffer
     val row = colNames.map(k => kvPairs.getOrElse(k,JsonNull.INSTANCE))
     rows += row
   }
+
+  def ncols = colNames.size
+
 }
 object LoadedRelationalDataset {
   val NULL_VALUE = ""

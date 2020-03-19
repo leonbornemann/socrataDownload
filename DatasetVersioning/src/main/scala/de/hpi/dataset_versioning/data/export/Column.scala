@@ -8,6 +8,11 @@ import scala.collection.mutable.ArrayBuffer
 
 case class Column(id: String, version: String, attrName: String, values:Seq[String]) extends JsonWritable[Column]{
 
+  def valueMultiSet = {
+    values.groupBy(identity).mapValues(_.size)
+  }
+
+
   def uniqueness() = {
     values.toSet.size / values.size.toDouble
   }

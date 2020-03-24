@@ -5,9 +5,12 @@ import java.time.LocalDate
 
 import com.google.gson._
 import com.typesafe.scalalogging.StrictLogging
+import de.hpi.dataset_versioning.experiment.example_query_imputation.join.JoinVariant.JoinVariant
 import de.hpi.dataset_versioning.data.`export`.Column
 import de.hpi.dataset_versioning.data.diff.TupleMatcher
+import de.hpi.dataset_versioning.data.metadata.custom.{ColumnCustomMetadata, CustomMetadata}
 import de.hpi.dataset_versioning.data.parser.exceptions.SchemaMismatchException
+import de.hpi.dataset_versioning.experiment.example_query_imputation.join.JoinVariant
 import de.hpi.dataset_versioning.io.IOService
 import de.hpi.dataset_versioning.util.TableFormatter
 
@@ -15,7 +18,101 @@ import scala.collection.JavaConverters._
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 
-class LoadedRelationalDataset(val id:String, version:LocalDate, val rows:ArrayBuffer[Seq[JsonElement]]=ArrayBuffer()) extends StrictLogging{
+class LoadedRelationalDataset(val id:String, val version:LocalDate, val rows:ArrayBuffer[IndexedSeq[JsonElement]]=ArrayBuffer()) extends StrictLogging{
+
+  def getRowMultiSet = rows.groupBy(identity)
+    .mapValues(_.size)
+
+  def isEqualTo(other: LoadedRelationalDataset, mapping: mutable.HashMap[String, String]): Boolean = {
+    //we need to compare all tuples in the order specified by the mapping
+    if(other.ncols != ncols || mapping.size!=ncols)
+      false
+    else {
+      val tuplesToMatch = mutable.HashMap() ++ other.getRowMultiSet
+      var allTuplesFound = true
+      val it = rows.iterator
+      val otherColNameToIndex = other.colNames.zipWithIndex.toMap
+      while (it.hasNext && allTuplesFound) {
+        val curRow = it.next()
+        val curRowInOtherOrder = mutable.IndexedSeq.fill[JsonElement](curRow.size)(JsonNull.INSTANCE)
+        (0 until curRow.size).foreach(myColIndex => {
+          val myColName = colNames(myColIndex)
+          val otherColIndex = otherColNameToIndex(mapping(myColName))
+          curRowInOtherOrder(otherColIndex) = curRow(myColIndex)
+        })
+        val countInOtherDS = tuplesToMatch.getOrElse(curRowInOtherOrder, 0)
+        if (countInOtherDS == 0)
+          allTuplesFound = false
+        else if(countInOtherDS > 1)
+          tuplesToMatch(curRowInOtherOrder) = countInOtherDS - 1
+        else
+          tuplesToMatch.remove(curRowInOtherOrder) //we have matched all tuple duplicates
+      }
+      allTuplesFound && tuplesToMatch.isEmpty
+    }
+  }
+
+
+  def getSchemaSpecificHashValue: Int = {
+    columnHashes.toIndexedSeq.sortBy(_._1).hashCode()
+  }
+
+  def toMultiset[A](list: Seq[A]) = list.groupBy(identity).mapValues(_.size)
+
+  def getTupleSpecificHash: Int = {
+    val tupleMultiset = toMultiset(rows
+      .map(tuple => toMultiset(tuple.map(getCellValueAsString(_)))))
+      /*.sorted(new Ordering[Seq[String]] {
+      override def compare(x: Seq[String], y: Seq[String]): Int = {
+        val it = x.zip(y).iterator
+        var res = 0
+        while(it.hasNext && res==0){
+          val (s1,s2) = it.next()
+          res = s1.compareTo(s2)
+        }
+        res
+      }
+    })*/
+    tupleMultiset.hashCode()
+  }
+
+  def extractCustomMetadata = {
+    calculateColumnHashes()
+    CustomMetadata(id,version.format(IOService.dateTimeFormatter),rows.size,getSchemaSpecificHashValue,getTupleSpecificHash,ColumnCustomMetadata(columnHashes.toMap))
+  }
+
+  def join(other: LoadedRelationalDataset, myJoinCol: String, otherJoinCol: String,variant:JoinVariant):LoadedRelationalDataset = {
+    val joinDataset = new LoadedRelationalDataset(id + s"_joinedOn($myJoinCol,$otherJoinCol)_with_" +other.id ,version)
+    if(variant == JoinVariant.KeepBoth) {
+      joinDataset.colNames = colNames ++ other.colNames
+    } else if (variant == JoinVariant.KeepLeft){
+      joinDataset.colNames = colNames ++ other.colNames.filter(_ != otherJoinCol)
+    } else{
+      joinDataset.colNames = colNames.filter(_ != myJoinCol) ++ other.colNames.filter(_ != otherJoinCol)
+    }
+    joinDataset.colNameSet = joinDataset.colNames.toSet
+    joinDataset.erroneous = erroneous || other.erroneous
+    joinDataset.containsArrays = containsArrays || other.containsArrays
+    joinDataset.containedNestedObjects = containedNestedObjects | other.containedNestedObjects
+    val otherJoinColIndex = other.colNames.indexOf(otherJoinCol)
+    val myJoinColIndex = colNames.indexOf(myJoinCol)
+    val byKey = other.rows.groupBy(c => getCellValueAsString(c(otherJoinColIndex)))
+    rows.foreach(r => {
+      val valueInJoinColumn = getCellValueAsString(r(myJoinColIndex))
+      byKey.getOrElse(valueInJoinColumn,Seq())
+        .foreach(matchingRow => {
+          if(variant == JoinVariant.KeepBoth) {
+            joinDataset.rows += r ++ matchingRow
+          } else if (variant == JoinVariant.KeepLeft){
+            joinDataset.rows += r ++ matchingRow.slice(0,otherJoinColIndex) ++ matchingRow.slice(otherJoinColIndex+1,matchingRow.size)
+          } else{
+            joinDataset.rows += r.slice(0,myJoinColIndex) ++ r.slice(myJoinColIndex,r.size) ++ matchingRow
+          }
+        })
+    })
+    joinDataset
+  }
+
 
   def calculateColumnHashes() = {
     columnHashes.clear()

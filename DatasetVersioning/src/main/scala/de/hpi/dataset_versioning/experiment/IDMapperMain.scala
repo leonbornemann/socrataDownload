@@ -1,6 +1,6 @@
 package de.hpi.dataset_versioning.experiment
 
-import de.hpi.dataset_versioning.data.IdentifierMapping
+import de.hpi.dataset_versioning.data.metadata.custom.IdentifierMapping
 import de.hpi.dataset_versioning.io.IOService
 import de.hpi.dataset_versioning.io.StatusReportMain.args
 

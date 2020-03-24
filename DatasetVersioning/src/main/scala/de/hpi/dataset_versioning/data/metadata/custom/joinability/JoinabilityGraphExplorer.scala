@@ -1,10 +1,10 @@
-package de.hpi.dataset_versioning.experiment
+package de.hpi.dataset_versioning.data.metadata.custom.joinability
 
 import java.io.{File, PrintWriter}
 import java.time.LocalDate
 
 import com.typesafe.scalalogging.StrictLogging
-import de.hpi.dataset_versioning.data.IdentifierMapping
+import de.hpi.dataset_versioning.data.metadata.custom.IdentifierMapping
 import de.hpi.dataset_versioning.io.IOService
 
 import scala.io.Source
@@ -41,7 +41,7 @@ class JoinabilityGraphExplorer() extends StrictLogging {
     var count = 0
     var errCount = 0
     var dsErrCount = 0
-    pr.println("scrDSID,scrColID,targetDSID,targetColID,highestThreshold,highestUniqueness")
+    pr.println("scrDSID,scrColID,targetDSID,targetColID,containmentOfSrcInTarget")
     while(lineIterator.hasNext){
       val tokens = lineIterator.next().split(",")
       assert(tokens.size==9)
@@ -53,10 +53,9 @@ class JoinabilityGraphExplorer() extends StrictLogging {
         if(dsNameToID.contains(sourceTable) && dsNameToID.contains(targetTable)) {
           val (srcID, targetID) = (dsNameToID(sourceTable), dsNameToID(targetTable))
           if (dsIDColNameToColID.contains((srcID, sourceAttr)) && dsIDColNameToColID.contains(targetID, targetAttr)) {
-            val (srcColID, srcUniqueness) = dsIDColNameToColID((srcID, sourceAttr))
-            val (targetColID, targetUniqueness) = dsIDColNameToColID((targetID, targetAttr))
-            val maxUniqueness = Math.max(srcUniqueness, targetUniqueness)
-            pr.println(s"$srcID,$srcColID,$targetID,$targetColID,$highestThreshold,$maxUniqueness")
+            val (srcColID, _) = dsIDColNameToColID((srcID, sourceAttr))
+            val (targetColID, _) = dsIDColNameToColID((targetID, targetAttr))
+            pr.println(s"$srcID,$srcColID,$targetID,$targetColID,$highestThreshold")
           } else {
             errCount += 1
           }

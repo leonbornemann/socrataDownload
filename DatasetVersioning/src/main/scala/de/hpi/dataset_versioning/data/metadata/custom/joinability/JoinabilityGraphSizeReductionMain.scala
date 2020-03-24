@@ -1,8 +1,6 @@
-package de.hpi.dataset_versioning.experiment
+package de.hpi.dataset_versioning.data.metadata.custom.joinability
 
 import java.io.File
-
-import scala.io.Source
 
 object JoinabilityGraphSizeReductionMain extends App {
   val explorer = new JoinabilityGraphExplorer()

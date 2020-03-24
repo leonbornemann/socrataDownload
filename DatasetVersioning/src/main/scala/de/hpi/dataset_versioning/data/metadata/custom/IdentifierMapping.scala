@@ -1,4 +1,4 @@
-package de.hpi.dataset_versioning.data
+package de.hpi.dataset_versioning.data.metadata.custom
 
 import java.io.{File, PrintWriter}
 import java.time.LocalDate

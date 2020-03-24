@@ -10,6 +10,7 @@ import com.google.gson.stream.JsonReader
 import com.typesafe.scalalogging.StrictLogging
 import de.hpi.dataset_versioning.data.LoadedRelationalDataset
 import de.hpi.dataset_versioning.data.metadata.DatasetMetadata
+import de.hpi.dataset_versioning.data.metadata.custom.{CustomMetadata, CustomMetadataCollection}
 import de.hpi.dataset_versioning.data.parser.JsonDataParser
 import de.hpi.dataset_versioning.matching.DatasetInstance
 
@@ -19,6 +20,17 @@ import scala.io.Source
 import scala.reflect.io.Directory
 
 object IOService extends StrictLogging{
+
+  var socrataDir:String = null
+  val dateTimeFormatter = DateTimeFormatter.ISO_LOCAL_DATE
+  val cachedMetadata = mutable.Map[LocalDate,mutable.Map[String,DatasetMetadata]]() //TODO: shrink this cache at some point - use caching library?: https://stackoverflow.com/questions/3651313/how-to-cache-results-in-scala
+  val cachedCustomMetadata = mutable.Map[LocalDate,Map[String,CustomMetadata]]() //TODO: shrink this cache at some point - use caching library?: https://stackoverflow.com/questions/3651313/how-to-cache-results-in-scala
+  val datasetCache = mutable.Map[DatasetInstance,LoadedRelationalDataset]()
+
+  def cacheCustomMetadata(version: LocalDate) = {
+    val mdColelction = CustomMetadataCollection.fromJsonFile(IOService.getCustomMetadataFile(version).getAbsolutePath)
+    cachedCustomMetadata(version) = mdColelction.metadata
+  }
 
   def clearUncompressedSnapshot(date: LocalDate) = new Directory(getUncompressedDataDir(date)).deleteRecursively() //TODO: existance checks?
   def clearUncompressedDiff(date: LocalDate) = new Directory(getUncompressedDiffDir(date)).deleteRecursively()
@@ -47,24 +59,28 @@ object IOService extends StrictLogging{
   private val jsonParser = new JsonDataParser
 
   def loadDataset(datasetInstance: DatasetInstance,skipParseExceptions:Boolean = false) = {
-    val subDirectory = new File(DATA_DIR_UNCOMPRESSED + datasetInstance.date.format(dateTimeFormatter) + "/")
-    if(!subDirectory.exists())
-      throw new AssertionError(s"${subDirectory} must be extracted to working directory first")
-    val datasetFile = new File(subDirectory.getAbsolutePath + "/" + jsonFilenameFromID(datasetInstance.id))
-    if(!datasetFile.exists())
-      throw new AssertionError(s"${datasetInstance.id} does not exist in ${datasetInstance.date}")
-    if(skipParseExceptions){
-      val ds = jsonParser.tryParseJsonFile(datasetFile,datasetInstance.id,datasetInstance.date)
-      if(ds.isDefined) {
-        ds.get
+    if(datasetCache.contains(datasetInstance))
+      datasetCache(datasetInstance)
+    else {
+      val subDirectory = new File(DATA_DIR_UNCOMPRESSED + datasetInstance.date.format(dateTimeFormatter) + "/")
+      if (!subDirectory.exists())
+        throw new AssertionError(s"${subDirectory} must be extracted to working directory first")
+      val datasetFile = new File(subDirectory.getAbsolutePath + "/" + jsonFilenameFromID(datasetInstance.id))
+      if (!datasetFile.exists())
+        throw new AssertionError(s"${datasetInstance.id} does not exist in ${datasetInstance.date}")
+      if (skipParseExceptions) {
+        val ds = jsonParser.tryParseJsonFile(datasetFile, datasetInstance.id, datasetInstance.date)
+        if (ds.isDefined) {
+          ds.get
+        }
+        else {
+          val ds = new LoadedRelationalDataset(datasetInstance.id, datasetInstance.date)
+          ds.erroneous = true
+          ds
+        }
+      } else {
+        jsonParser.parseJsonFile(datasetFile, datasetInstance.id, datasetInstance.date)
       }
-      else {
-        val ds = new LoadedRelationalDataset(datasetInstance.id,datasetInstance.date)
-        ds.erroneous=true
-        ds
-      }
-    } else{
-      jsonParser.parseJsonFile(datasetFile,datasetInstance.id,datasetInstance.date)
     }
   }
 
@@ -78,6 +94,19 @@ object IOService extends StrictLogging{
 
   def tryLoadDataset(id:String,version:LocalDate) = {
     loadDataset(new DatasetInstance(id,version),true)
+  }
+
+  def tryLoadAndCacheDataset(id:String,version:LocalDate) = {
+    val ds = loadDataset(new DatasetInstance(id,version),true)
+    cacheDataset(ds)
+    ds
+  }
+
+  def cacheDataset(ds:LoadedRelationalDataset) = {
+    datasetCache.put(new DatasetInstance(ds.id,ds.version),ds)
+    if(datasetCache.size%100 == 0){
+      logger.trace(s"Current Dataset Cache Size: ${datasetCache.size}")
+    }
   }
 
   def fileNameToDate(f: File) = LocalDate.parse(filenameWithoutFiletype(f),dateTimeFormatter)
@@ -101,7 +130,8 @@ object IOService extends StrictLogging{
   def getDatasetIdMappingFile(date: LocalDate) = new File(SNAPSHOT_METADATA_DIR + date.format(dateTimeFormatter) + "/dsIDMap.csv")
   def getColumnIdMappingFile(date:LocalDate) = new File(SNAPSHOT_METADATA_DIR + date.format(dateTimeFormatter) + "/columnIDMap.csv")
   def getInferredProjectionFile(date: LocalDate) = new File(SNAPSHOT_METADATA_DIR + date.format(dateTimeFormatter) + "/inferredProjections.csv")
-
+  def getInferredJoinFile(date: LocalDate) = new File(SNAPSHOT_METADATA_DIR + date.format(dateTimeFormatter) + "/inferredJoins.csv")
+  def getCustomMetadataFile(date: LocalDate) = new File(SNAPSHOT_METADATA_DIR + date.format(dateTimeFormatter) + "/customMetadata.json")
   def getCompressedDataFile(date: LocalDate): File = new File(DATA_DIR + date.format(dateTimeFormatter) + ".zip")
   def getCompressedDiffFile(date: LocalDate): File = new File(DIFF_DIR + date.format(dateTimeFormatter) + "_diff.zip")
 
@@ -182,12 +212,6 @@ object IOService extends StrictLogging{
       extractedFiles.toSet
     }
   }
-
-  var socrataDir:String = null
-
-  val dateTimeFormatter = DateTimeFormatter.ISO_LOCAL_DATE
-
-  val cachedMetadata = mutable.Map[LocalDate,mutable.Map[String,DatasetMetadata]]() //TODO: shrink this cache at some point - use caching library?: https://stackoverflow.com/questions/3651313/how-to-cache-results-in-scala
 
   def cacheMetadata(localDate: LocalDate) = {
     cachedMetadata(localDate) = mutable.HashMap()

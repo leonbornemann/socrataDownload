@@ -11,6 +11,7 @@ trait JsonWritable[T<:AnyRef] {
   implicit val formats = DefaultFormats + new EnumNameSerializer(Provenance)
 
 
+
   def toJson() = {
     org.json4s.jackson.Serialization.write(this)
   }

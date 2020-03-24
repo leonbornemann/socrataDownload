@@ -1,4 +1,4 @@
-package de.hpi.dataset_versioning.experiment.example_query_imputation
+package de.hpi.dataset_versioning.experiment.example_query_imputation.projection
 
 import java.time.LocalDate
 
@@ -23,7 +23,7 @@ object ProjectionAnalysisMain extends App with StrictLogging{
   val actualProjections = projectionSet.filter(info => info.ncolsOriginal != info.ncolsProjection)
   println(projectionSet.size)
   println(actualProjections.size)
-  actualProjections.foreach(pI => {
+  /*actualProjections.foreach(pI => {
     logger.debug(s"Detected Projection: $pI")
     val ds1 = IOService.tryLoadDataset(pI.originalID,version)
     val ds2 = IOService.tryLoadDataset(pI.projectedID,version)
@@ -31,7 +31,7 @@ object ProjectionAnalysisMain extends App with StrictLogging{
     logger.debug("to")
     ds2.print()
     logger.debug("")
-  })
+  })*/
   val datasets = actualProjections.flatMap(pI => Set(pI.originalID)).toSet
   val datasetsProjected = actualProjections.flatMap(pI => Set(pI.projectedID)).toSet
   logger.debug(s"${datasets.size}")

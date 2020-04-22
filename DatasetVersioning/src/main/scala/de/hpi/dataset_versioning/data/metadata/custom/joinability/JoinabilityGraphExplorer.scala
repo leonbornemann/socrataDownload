@@ -41,7 +41,7 @@ class JoinabilityGraphExplorer() extends StrictLogging {
     var count = 0
     var errCount = 0
     var dsErrCount = 0
-    pr.println("scrDSID,scrColID,targetDSID,targetColID,containmentOfSrcInTarget")
+    pr.println("scrDSID,scrColID,targetDSID,targetColID,containmentOfSrcInTarget,maxUniqueness")
     while(lineIterator.hasNext){
       val tokens = lineIterator.next().split(",")
       assert(tokens.size==9)
@@ -53,9 +53,10 @@ class JoinabilityGraphExplorer() extends StrictLogging {
         if(dsNameToID.contains(sourceTable) && dsNameToID.contains(targetTable)) {
           val (srcID, targetID) = (dsNameToID(sourceTable), dsNameToID(targetTable))
           if (dsIDColNameToColID.contains((srcID, sourceAttr)) && dsIDColNameToColID.contains(targetID, targetAttr)) {
-            val (srcColID, _) = dsIDColNameToColID((srcID, sourceAttr))
-            val (targetColID, _) = dsIDColNameToColID((targetID, targetAttr))
-            pr.println(s"$srcID,$srcColID,$targetID,$targetColID,$highestThreshold")
+            val (srcColID, srcUniqueness) = dsIDColNameToColID((srcID, sourceAttr))
+            val (targetColID, targetUniqueness) = dsIDColNameToColID((targetID, targetAttr))
+            val maxUniqueness = Math.max(srcUniqueness, targetUniqueness)
+            pr.println(s"$srcID,$srcColID,$targetID,$targetColID,$highestThreshold,$maxUniqueness")
           } else {
             errCount += 1
           }
@@ -67,6 +68,34 @@ class JoinabilityGraphExplorer() extends StrictLogging {
       count +=1
     }
     pr.close()
+  }
+
+  def exploreGraph(graph: JoinabilityGraph) = {
+    logger.debug(s"numEdges: ${graph.numEdges()}")
+    System.gc()
+    logger.debug("Graph loaded - check htop now, afterwards press enter")
+    var a = scala.io.StdIn.readLine()
+    logger.debug("continuing")
+    graph.switchToAdjacencyListGroupedByDSAndCol()
+    logger.debug(s"numEdges: ${graph.numEdges()}")
+    System.gc()
+    logger.debug("Representation switched - check htop now, afterwards press enter")
+    a = scala.io.StdIn.readLine()
+    logger.debug("continuing")
+  }
+
+  def exploreGraphMemory(version:LocalDate) = {
+    logger.debug("Nothing loaded - press enter to start")
+    val a = scala.io.StdIn.readLine()
+    logger.debug("loading filtered graph")
+    var graph = JoinabilityGraph.readGraphFromGoOutput(IOService.getJoinabilityGraphFile(version),1.0f)
+    exploreGraph(graph)
+    graph = null
+    System.gc()
+    logger.debug("loading unfiltered graph")
+    graph = JoinabilityGraph.readGraphFromGoOutput(IOService.getJoinabilityGraphFile(version))
+    exploreGraph(graph)
+
   }
 
   def explore(path: String) = {

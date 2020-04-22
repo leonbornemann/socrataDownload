@@ -7,9 +7,9 @@ case class CustomMetadata(id:String,
                           nrows:Int,
                           schemaSpecificHash:Int,
                           tupleSpecificHash:Int,
-                          columnMetadata: ColumnCustomMetadata,
+                          columnMetadata: Map[String,ColumnCustomMetadata], //maps colname to its metadata
                          ) extends JsonWritable[CustomMetadata]{
 
-  def ncols = columnMetadata.colHashes.size
+  def ncols = columnMetadata.size
 
 }

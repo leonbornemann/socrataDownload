@@ -1,4 +1,4 @@
-package de.hpi.dataset_versioning.data.`export`
+package de.hpi.dataset_versioning.data.metadata.custom.joinability.`export`
 
 import de.hpi.dataset_versioning.data.JsonWritable
 

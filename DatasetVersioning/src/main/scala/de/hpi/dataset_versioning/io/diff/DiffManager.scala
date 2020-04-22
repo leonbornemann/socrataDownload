@@ -10,34 +10,53 @@ class DiffManager(daysBetweenCheckpoints:Int=7) extends StrictLogging{
 
   def replaceAllNonCheckPointsWithDiffs(tmpDirectory:File) = {
     val versions = IOService.getSortedDatalakeVersions()
-    for(i <- 1 until versions.size) {
-      val version = versions(i)
-      if(!isCheckpoint(i) && !IOService.compressedDiffExists(version)){
-        logger.debug(s"Starting replacement of $version")
-        logger.debug(s"Calculating Diff")
-        calculateDiff(version)
-        logger.debug(s"Testing Snapshot Restore in temporary Directory")
-        restoreSnapshotFromDiff(version,Some(tmpDirectory))
-        IOService.extractDataToWorkingDir(version)
-        val uncompressedDir = IOService.getUncompressedDataDir(version)
-        if(IOUtil.dirEquals(tmpDirectory,uncompressedDir)){
-          logger.debug(s"Snapshot Restore successful - deleting zipped files")
-          IOService.getCompressedDataFile(version).delete()
-        } else{
-          throw new AssertionError(s"Restored Directory ${tmpDirectory.getAbsolutePath} contents do not match original ($uncompressedDir) - aborting")
+    val actions = (0 until versions.size).map(i => {
+      if(!isCheckpoint(i) && IOService.compressedDiffExists(versions(i)))
+        (versions(i),"Keep compressed Diff as is")
+      else if(!isCheckpoint(i) && !IOService.compressedDiffExists(versions(i)))
+        (versions(i),"Replace with compressed Diff")
+      else
+        (versions(i),"Keep as Checkpoint")
+    })
+    logger.debug("DiffManager is about to perform the following actions:")
+    actions.groupBy(a =>a._2)
+        .toSeq
+        .sortBy(_._2.head._1.toEpochDay)
+        .foreach{ case(action,versions) => logger.debug(s"$action: ${versions.map(_._1)}")}
+    logger.debug("Enter y to continue, anything else to exit")
+    val input = scala.io.StdIn.readLine()
+    if(input.toLowerCase() == "y") {
+      for(i <- 1 until versions.size) {
+        val version = versions(i)
+        if(!isCheckpoint(i) && !IOService.compressedDiffExists(version)){
+          logger.debug(s"Starting replacement of $version")
+          logger.debug(s"Calculating Diff")
+          calculateDiff(version)
+          logger.debug(s"Testing Snapshot Restore in temporary Directory")
+          restoreFullSnapshotFromDiff(version,Some(tmpDirectory))
+          IOService.extractDataToWorkingDir(version)
+          val uncompressedDir = IOService.getUncompressedDataDir(version)
+          if(IOUtil.dirEquals(tmpDirectory,uncompressedDir)){
+            logger.debug(s"Snapshot Restore successful - deleting zipped files")
+            IOService.getCompressedDataFile(version).delete()
+          } else{
+            throw new AssertionError(s"Restored Directory ${tmpDirectory.getAbsolutePath} contents do not match original ($uncompressedDir) - aborting")
+          }
+          if(IOService.uncompressedSnapshotExists(version.minusDays(2))){
+            IOService.clearUncompressedSnapshot(version.minusDays(2))
+            IOService.clearUncompressedDiff(version.minusDays(2))
+          }
+          if(IOService.uncompressedSnapshotExists(version.minusDays(3))){
+            //happens if we passed a checkpoint
+            IOService.clearUncompressedSnapshot(version.minusDays(3))
+            IOService.clearUncompressedDiff(version.minusDays(3))
+          }
+          logger.debug(s"Cleaning up temporary Directory")
+          IOUtil.clearDirectoryContent(tmpDirectory)
         }
-        if(IOService.uncompressedSnapshotExists(version.minusDays(2))){
-          IOService.clearUncompressedSnapshot(version.minusDays(2))
-          IOService.clearUncompressedDiff(version.minusDays(2))
-        }
-        if(IOService.uncompressedSnapshotExists(version.minusDays(3))){
-          //happens if we passed a checkpoint
-          IOService.clearUncompressedSnapshot(version.minusDays(3))
-          IOService.clearUncompressedDiff(version.minusDays(3))
-        }
-        logger.debug(s"Cleaning up temporary Directory")
-        IOUtil.clearDirectoryContent(tmpDirectory)
       }
+    } else{
+      logger.debug("terminating")
     }
   }
 
@@ -58,7 +77,7 @@ class DiffManager(daysBetweenCheckpoints:Int=7) extends StrictLogging{
     }
   }
 
-  def restoreSnapshotFromDiff(version:LocalDate,targetDir:Option[File] = None) = {
+  def restoreFullSnapshotFromDiff(version:LocalDate, targetDir:Option[File] = None) = {
     if(IOService.compressedSnapshotExists(version)){
       logger.trace(s"Skipping restore of ${version} because it already exists")
     } else if(IOService.getUncompressedDataDir(version).exists() && !targetDir.isDefined){

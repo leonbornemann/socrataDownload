@@ -1,12 +1,17 @@
-package de.hpi.dataset_versioning.data.`export`
+package de.hpi.dataset_versioning.data.metadata.custom.joinability.`export`
 
 import java.time.LocalDate
 
+import de.hpi.dataset_versioning.data.metadata.custom.ColumnDatatype
 import de.hpi.dataset_versioning.data.{JsonWritable, LoadedRelationalDataset}
 
 import scala.collection.mutable.ArrayBuffer
 
 case class Column(id: String, version: String, attrName: String, values:Seq[String]) extends JsonWritable[Column]{
+  def dataType() = {
+    if(isNumeric) ColumnDatatype.Numeric else ColumnDatatype.String
+  }
+
 
   def valueMultiSet = {
     values.groupBy(identity).mapValues(_.size)

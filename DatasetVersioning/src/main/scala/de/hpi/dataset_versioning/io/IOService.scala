@@ -120,6 +120,7 @@ object IOService extends StrictLogging{
   def WORKING_DIR:String = socrataDir + "/workingDir/"
   def DATA_DIR_UNCOMPRESSED = WORKING_DIR + "/snapshots/"
   def DIFF_DIR_UNCOMPRESSED = WORKING_DIR + "/diffs/"
+  def VERSION_HISTORY_METADATA_DIR = WORKING_DIR + "/versionHistory/"
 
   private def filenameWithoutFiletype(f: File) = {
     f.getName.split("\\.")(0)
@@ -132,8 +133,11 @@ object IOService extends StrictLogging{
   def getInferredProjectionFile(date: LocalDate) = new File(SNAPSHOT_METADATA_DIR + date.format(dateTimeFormatter) + "/inferredProjections.csv")
   def getInferredJoinFile(date: LocalDate) = new File(SNAPSHOT_METADATA_DIR + date.format(dateTimeFormatter) + "/inferredJoins.csv")
   def getCustomMetadataFile(date: LocalDate) = new File(SNAPSHOT_METADATA_DIR + date.format(dateTimeFormatter) + "/customMetadata.json")
+  def getVersionHistoryFile() = new File(VERSION_HISTORY_METADATA_DIR + "/datasetVersionHistory.csv")
+  //data and diff files
   def getCompressedDataFile(date: LocalDate): File = new File(DATA_DIR + date.format(dateTimeFormatter) + ".zip")
   def getCompressedDiffFile(date: LocalDate): File = new File(DIFF_DIR + date.format(dateTimeFormatter) + "_diff.zip")
+
 
   def createAndReturn(file: File) = {
     if(!file.exists()) file.mkdirs()
@@ -144,7 +148,6 @@ object IOService extends StrictLogging{
   def getUncompressedDiffDir(date: LocalDate) = createAndReturn(new File(DIFF_DIR_UNCOMPRESSED + date.format(dateTimeFormatter) + "_diff"))
   def getUncompressedDataDir(date: LocalDate) = createAndReturn(new File(DATA_DIR_UNCOMPRESSED + date.format(dateTimeFormatter)))
   def getSnapshotMetadataDir(date: LocalDate) = createAndReturn(new File(SNAPSHOT_METADATA_DIR + date.format(dateTimeFormatter)))
-
 
   private def compressToFile(sourceDir: File,targetDir:File) = {
     logger.debug(s"Compressing data from ${sourceDir.getAbsolutePath} to ${targetDir.getAbsolutePath}")

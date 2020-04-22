@@ -11,5 +11,5 @@ object SnapshotRestoreMain extends App {
   IOService.printSummary()
   val version = LocalDate.parse(args(1),IOService.dateTimeFormatter)
   val transformer = new DiffManager(7)
-  transformer.restoreSnapshotFromDiff(version)
+  transformer.restoreFullSnapshotFromDiff(version)
 }

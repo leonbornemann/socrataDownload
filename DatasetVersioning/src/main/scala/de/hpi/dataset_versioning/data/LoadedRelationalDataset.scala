@@ -5,12 +5,12 @@ import java.time.LocalDate
 
 import com.google.gson._
 import com.typesafe.scalalogging.StrictLogging
-import de.hpi.dataset_versioning.experiment.example_query_imputation.join.JoinVariant.JoinVariant
-import de.hpi.dataset_versioning.data.`export`.Column
+import de.hpi.dataset_versioning.experiment.example_query_imputation.join.JoinConstructionVariant.JoinConstructionVariant
+import de.hpi.dataset_versioning.data.metadata.custom.joinability.`export`.Column
 import de.hpi.dataset_versioning.data.diff.TupleMatcher
 import de.hpi.dataset_versioning.data.metadata.custom.{ColumnCustomMetadata, CustomMetadata}
 import de.hpi.dataset_versioning.data.parser.exceptions.SchemaMismatchException
-import de.hpi.dataset_versioning.experiment.example_query_imputation.join.JoinVariant
+import de.hpi.dataset_versioning.experiment.example_query_imputation.join.JoinConstructionVariant
 import de.hpi.dataset_versioning.io.IOService
 import de.hpi.dataset_versioning.util.TableFormatter
 
@@ -54,7 +54,7 @@ class LoadedRelationalDataset(val id:String, val version:LocalDate, val rows:Arr
 
 
   def getSchemaSpecificHashValue: Int = {
-    columnHashes.toIndexedSeq.sortBy(_._1).hashCode()
+    columnMetadata.toIndexedSeq.sortBy(_._1).hashCode()
   }
 
   def toMultiset[A](list: Seq[A]) = list.groupBy(identity).mapValues(_.size)
@@ -77,15 +77,15 @@ class LoadedRelationalDataset(val id:String, val version:LocalDate, val rows:Arr
   }
 
   def extractCustomMetadata = {
-    calculateColumnHashes()
-    CustomMetadata(id,version.format(IOService.dateTimeFormatter),rows.size,getSchemaSpecificHashValue,getTupleSpecificHash,ColumnCustomMetadata(columnHashes.toMap))
+    calculateColumnMetadata()
+    CustomMetadata(id,version.format(IOService.dateTimeFormatter),rows.size,getSchemaSpecificHashValue,getTupleSpecificHash,columnMetadata.toMap)
   }
 
-  def join(other: LoadedRelationalDataset, myJoinCol: String, otherJoinCol: String,variant:JoinVariant):LoadedRelationalDataset = {
+  def join(other: LoadedRelationalDataset, myJoinCol: String, otherJoinCol: String,variant:JoinConstructionVariant):LoadedRelationalDataset = {
     val joinDataset = new LoadedRelationalDataset(id + s"_joinedOn($myJoinCol,$otherJoinCol)_with_" +other.id ,version)
-    if(variant == JoinVariant.KeepBoth) {
+    if(variant == JoinConstructionVariant.KeepBoth) {
       joinDataset.colNames = colNames ++ other.colNames
-    } else if (variant == JoinVariant.KeepLeft){
+    } else if (variant == JoinConstructionVariant.KeepLeft){
       joinDataset.colNames = colNames ++ other.colNames.filter(_ != otherJoinCol)
     } else{
       joinDataset.colNames = colNames.filter(_ != myJoinCol) ++ other.colNames.filter(_ != otherJoinCol)
@@ -101,9 +101,9 @@ class LoadedRelationalDataset(val id:String, val version:LocalDate, val rows:Arr
       val valueInJoinColumn = getCellValueAsString(r(myJoinColIndex))
       byKey.getOrElse(valueInJoinColumn,Seq())
         .foreach(matchingRow => {
-          if(variant == JoinVariant.KeepBoth) {
+          if(variant == JoinConstructionVariant.KeepBoth) {
             joinDataset.rows += r ++ matchingRow
-          } else if (variant == JoinVariant.KeepLeft){
+          } else if (variant == JoinConstructionVariant.KeepLeft){
             joinDataset.rows += r ++ matchingRow.slice(0,otherJoinColIndex) ++ matchingRow.slice(otherJoinColIndex+1,matchingRow.size)
           } else{
             joinDataset.rows += r.slice(0,myJoinColIndex) ++ r.slice(myJoinColIndex,r.size) ++ matchingRow
@@ -114,10 +114,11 @@ class LoadedRelationalDataset(val id:String, val version:LocalDate, val rows:Arr
   }
 
 
-  def calculateColumnHashes() = {
-    columnHashes.clear()
-    columnHashes ++= (0 until ncols).map(i => {
-      (colNames(i),getColumnObject(i).valueMultiSet.hashCode())
+  def calculateColumnMetadata() = {
+    columnMetadata.clear()
+    columnMetadata ++= (0 until ncols).map(i => {
+      val curColObject = getColumnObject(i)
+      (colNames(i),ColumnCustomMetadata(colNames(i),curColObject.valueMultiSet.hashCode(),curColObject.uniqueness(),curColObject.dataType()))
     })
   }
 
@@ -242,7 +243,7 @@ class LoadedRelationalDataset(val id:String, val version:LocalDate, val rows:Arr
   private var containedNestedObjects = false
   var containsArrays = false
   var erroneous = false
-  var columnHashes = mutable.HashMap[String,Int]()
+  var columnMetadata = mutable.HashMap[String,ColumnCustomMetadata]()
 
 
   def setSchema(firstObj:JsonObject) = {

@@ -9,7 +9,7 @@ import org.json4s.ext.EnumNameSerializer
 
 trait JsonWritable[T<:AnyRef] {
 
-  implicit val formats = DefaultFormats + new EnumNameSerializer(Provenance) + new EnumNameSerializer(ColumnDatatype)
+  implicit val formats = DefaultFormats + new EnumNameSerializer(Provenance) + new EnumNameSerializer(ColumnDatatype) + LocalDateSerializer
 
 
 

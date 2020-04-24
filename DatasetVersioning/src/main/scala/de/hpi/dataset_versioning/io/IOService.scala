@@ -21,6 +21,30 @@ import scala.reflect.io.Directory
 
 object IOService extends StrictLogging{
 
+  def saveDeleteCompressedDataFile(version: LocalDate): Unit = {
+    //check if we can safely delete this
+    val checkpointsBefore = getCheckpoints()
+      .filter(_.isBefore(version))
+    if(checkpointsBefore.isEmpty){
+      logger.warn(s"No checkpoint found before $version - will not delete!")
+    } else{
+      val latestCheckpoint = checkpointsBefore.last
+      var curDiffVersion = latestCheckpoint.plusDays(1)
+      var deleteIsSafe = true
+      while(curDiffVersion.toEpochDay <=version.toEpochDay && deleteIsSafe){
+        deleteIsSafe = deleteIsSafe && diffExists(curDiffVersion)
+        curDiffVersion = curDiffVersion.plusDays(1)
+      }
+      if(deleteIsSafe) {
+        logger.debug(s"Safely deleting $version")
+        getCompressedDataFile(version).delete()
+      } else{
+        logger.debug(s"Can not safely delete $version")
+      }
+    }
+  }
+
+
   var socrataDir:String = null
   val dateTimeFormatter = DateTimeFormatter.ISO_LOCAL_DATE
   val cachedMetadata = mutable.Map[LocalDate,mutable.Map[String,DatasetMetadata]]() //TODO: shrink this cache at some point - use caching library?: https://stackoverflow.com/questions/3651313/how-to-cache-results-in-scala
@@ -51,6 +75,8 @@ object IOService extends StrictLogging{
   def compressedDiffExists(version: LocalDate) = getCompressedDiffFile(version).exists()
   def uncompressedSnapshotExists(version: LocalDate) = getUncompressedDataDir(version).exists() && !getUncompressedDataDir(version).listFiles().isEmpty
   def uncompressedDiffExists(version: LocalDate) = getUncompressedDiffDir(version).exists() && !getUncompressedDiffDir(version).listFiles().isEmpty
+  def snapshotExists(date: LocalDate) = compressedSnapshotExists(date) || uncompressedSnapshotExists(date)
+  def diffExists(version: LocalDate): Boolean = uncompressedDiffExists(version) || compressedDiffExists(version)
 
   def versionExists(date: LocalDate) = getSortedDatalakeVersions.contains(date)
 
@@ -118,9 +144,9 @@ object IOService extends StrictLogging{
   def SNAPSHOT_METADATA_DIR = socrataDir + "/snapshotMetadata/"
   def DIFF_DIR = socrataDir + "/diff/"
   def WORKING_DIR:String = socrataDir + "/workingDir/"
+  def VERSION_HISTORY_METADATA_DIR = socrataDir + "/versionHistory/"
   def DATA_DIR_UNCOMPRESSED = WORKING_DIR + "/snapshots/"
   def DIFF_DIR_UNCOMPRESSED = WORKING_DIR + "/diffs/"
-  def VERSION_HISTORY_METADATA_DIR = WORKING_DIR + "/versionHistory/"
 
   private def filenameWithoutFiletype(f: File) = {
     f.getName.split("\\.")(0)
@@ -250,10 +276,12 @@ object IOService extends StrictLogging{
   def getSortedZippedDatalakeSnapshots = zippedFilesToSortedDates(DATA_DIR)
 
   def getSortedUncompressedDiffs = new File(DIFF_DIR_UNCOMPRESSED).listFiles()
+    .filter(!_.listFiles.isEmpty)
     .map(f => LocalDate.parse(f.getName.split("_")(0), dateTimeFormatter))
     .sortBy(_.toEpochDay)
 
   def getSortedUncompressedSnapshots = new File(DATA_DIR_UNCOMPRESSED).listFiles()
+    .filter(!_.listFiles.isEmpty)
     .map(f => LocalDate.parse(filenameWithoutFiletype(f), dateTimeFormatter))
     .sortBy(_.toEpochDay)
 
@@ -275,4 +303,9 @@ object IOService extends StrictLogging{
       .toIndexedSeq
       .sortBy((t:LocalDate) => t.toEpochDay)
   }
+
+  def getCheckpoints() = (getSortedUncompressedSnapshots ++ getSortedZippedDatalakeSnapshots)
+    .toSet
+    .toIndexedSeq
+    .sortBy((t:LocalDate) => t.toEpochDay)
 }

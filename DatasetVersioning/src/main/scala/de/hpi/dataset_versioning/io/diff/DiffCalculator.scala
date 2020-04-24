@@ -16,6 +16,8 @@ import scala.sys.process._
 
 class DiffCalculator() extends StrictLogging{
 
+
+
   def getLines(file: File) = Source.fromFile(file).getLines().toSet
 
   def isDiffFile(f: File): Boolean = f.getName.endsWith(".diff")
@@ -106,12 +108,17 @@ class DiffCalculator() extends StrictLogging{
       //new Directory(diffDirectory).deleteRecursively()
   }
 
-  def calculateDiff(version:LocalDate,deleteUncompressed:Boolean=true) = {
+  def calculateDiff(version:LocalDate,deleteUncompressed:Boolean=true,restorePreviousSnapshotIfNecessary:Boolean=true) = {
     logger.trace("calculating diff for {}",version)
     IOService.extractDataToWorkingDir(version)
     val previousVersion = version.minusDays(1)
+    if(!restorePreviousSnapshotIfNecessary && !IOService.snapshotExists(previousVersion)){
+      throw new AssertionError(s"snapshot for $previousVersion does not exist")
+    }
+    if(restorePreviousSnapshotIfNecessary && !IOService.snapshotExists(previousVersion)){
+      new DiffManager().restoreFullSnapshotFromDiff(previousVersion,recursivelyRestoreSnapshots = true)
+    }
     if(!IOService.uncompressedSnapshotExists(previousVersion)){
-      assert(IOService.compressedSnapshotExists(previousVersion))
       IOService.extractDataToWorkingDir(previousVersion)
     }
     calculateAllDiffsFromUncompressed(previousVersion,version,deleteUncompressed)

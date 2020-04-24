@@ -64,32 +64,48 @@ class DiffManager(daysBetweenCheckpoints:Int=7) extends StrictLogging{
   def isCheckpoint(i: Int): Boolean = i % daysBetweenCheckpoints==0
   val diffCalculator = new DiffCalculator
 
-  def calculateDiff(version:LocalDate) = {
+  def calculateDiff(version:LocalDate,deleteUncompressed:Boolean = true,restorePreviousSnapshotIfNecessary:Boolean=true) = {
     if(!IOService.compressedDiffExists(version)){
       val diffDir = IOService.getUncompressedDiffDir(version)
       if(diffDir.exists()){
         IOUtil.clearDirectoryContent(diffDir)
       }
       diffDir.mkdirs()
-      diffCalculator.calculateDiff(version)
+      diffCalculator.calculateDiff(version,deleteUncompressed,restorePreviousSnapshotIfNecessary)
     } else{
       logger.debug(s"Skipping diff for version $version because it already exists")
     }
   }
 
-  def restoreFullSnapshotFromDiff(version:LocalDate, targetDir:Option[File] = None) = {
+  def restoreFullSnapshotFromDiff(version:LocalDate, targetDir:Option[File] = None,recursivelyRestoreSnapshots:Boolean = false):Unit = {
     if(IOService.compressedSnapshotExists(version)){
       logger.trace(s"Skipping restore of ${version} because it already exists")
-    } else if(IOService.getUncompressedDataDir(version).exists() && !targetDir.isDefined){
+    } else if(IOService.uncompressedSnapshotExists(version) && !targetDir.isDefined){
       logger.trace(s"Not restoring ${version} from Diff because uncompressed Snapshot exists for it - Compressed Snapshot will be created from uncompressed File.")
       IOService.compressDataFromWorkingDir(version)
     } else{
       assert(IOService.compressedDiffExists(version))
-      IOService.extractDataToWorkingDir(version.minusDays(1))
-      IOService.extractDiffToWorkingDir(version)
-      if(!targetDir.isDefined)
-        IOService.getUncompressedDataDir(version).mkdirs()
-      diffCalculator.recreateFromDiff(version,targetDir)
+      if(!recursivelyRestoreSnapshots && !IOService.snapshotExists(version.minusDays(1))){
+        throw new AssertionError(s"no snapshot available for ${version.minusDays(1)}")
+      } else if(IOService.snapshotExists(version.minusDays(1))) {
+        IOService.extractDataToWorkingDir(version.minusDays(1))
+        IOService.extractDiffToWorkingDir(version)
+        if(!targetDir.isDefined)
+          IOService.getUncompressedDataDir(version).mkdirs()
+        diffCalculator.recreateFromDiff(version,targetDir)
+      } else{
+        assert(recursivelyRestoreSnapshots)
+        logger.debug(s"recursively restoring ${version.minusDays(1)}")
+        restoreFullSnapshotFromDiff(version.minusDays(1),recursivelyRestoreSnapshots=true)
+        //TODO: fix code copy paste?
+        IOService.extractDataToWorkingDir(version.minusDays(1))
+        IOService.extractDiffToWorkingDir(version)
+        if(!targetDir.isDefined)
+          IOService.getUncompressedDataDir(version).mkdirs()
+        diffCalculator.recreateFromDiff(version,targetDir)
+        IOService.clearUncompressedSnapshot(version.minusDays(1))
+        IOService.saveDeleteCompressedDataFile(version.minusDays(1))
+      }
     }
   }
 

@@ -28,7 +28,7 @@ object CustomMetadataExportMain extends App with StrictLogging{
     val metadataCollection = HashMap[String,CustomMetadata]()
     var count = 0
     files.foreach(f => {
-      val ds = IOService.tryLoadDataset(f,version)
+      val ds = IOService.tryLoadDataset(IOService.filenameToID(f),version)
       if(!ds.isEmpty){
         val md = ds.extractCustomMetadata
         metadataCollection.put(IOService.filenameToID(f),md)

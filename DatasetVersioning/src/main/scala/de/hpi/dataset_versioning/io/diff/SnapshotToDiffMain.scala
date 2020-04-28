@@ -10,4 +10,5 @@ object SnapshotToDiffMain extends App {
   IOService.printSummary()
   val transformer = new DiffManager(7)
   transformer.replaceAllNonCheckPointsWithDiffs(new File(args(1)))
+
 }

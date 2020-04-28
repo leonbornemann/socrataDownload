@@ -13,4 +13,4 @@ class DatasetVersionHistory(val id:String,
 
 }
 
-object DatasetVersionHistory extends JsonReadable[LocalDate]
+object DatasetVersionHistory extends JsonReadable[DatasetVersionHistory]

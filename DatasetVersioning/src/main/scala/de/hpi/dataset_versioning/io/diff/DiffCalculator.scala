@@ -40,8 +40,7 @@ class DiffCalculator() extends StrictLogging{
           val originalName = diffToOriginalName(diffFilename)
           processedFiles += originalName
           val originalFilepath = uncompressedPreviousVersionDir.getAbsolutePath + "/" + originalName
-          val toExecute = s"patch --quiet -o ${target.getAbsolutePath + "/" + originalName} $originalFilepath ${f.getAbsolutePath}"
-          toExecute! //TODO: deal with rejects!
+          patchFile(target, f, originalName, originalFilepath)
         } else if(isDataFile(f)){
           //copy all created files (they are in the diff):
           val toExecute = s"cp ${f.getAbsolutePath} ${target.getAbsolutePath}"
@@ -62,6 +61,11 @@ class DiffCalculator() extends StrictLogging{
       })
     if(!externalTarget.isDefined)
       IOService.compressDataFromWorkingDir(version)
+  }
+
+  def patchFile(targetDir: File, diffFile: File, originalFileName: String, originalFilepath: String) = {
+    val toExecute = s"patch --quiet -o ${targetDir.getAbsolutePath + "/" + originalFileName} $originalFilepath ${diffFile.getAbsolutePath}"
+    toExecute ! //TODO: deal with rejects!
   }
 
   def deleteUnmeaningfulDiffs(diffDirectory:File) = {

@@ -4,6 +4,7 @@ import java.io.File
 import java.time.LocalDate
 
 import com.typesafe.scalalogging.StrictLogging
+import de.hpi.dataset_versioning.data.metadata.custom.joinability.`export`.SnapshotDiff
 import de.hpi.dataset_versioning.io.{IOService, IOUtil}
 
 class DiffManager(daysBetweenCheckpoints:Int=7) extends StrictLogging{
@@ -75,6 +76,43 @@ class DiffManager(daysBetweenCheckpoints:Int=7) extends StrictLogging{
     } else{
       logger.debug(s"Skipping diff for version $version because it already exists")
     }
+  }
+
+  def restoreMinimalSnapshot(version:LocalDate) = {
+    if(IOService.minimalUncompressedVersionDirExists(version)){
+      logger.debug(s"skipping minimal snapshot restore of version $version because it already exists")
+    } else {
+      logger.debug(s"beginning minimal snapshot restore of version $version")
+      IOService.extractDiffToWorkingDir(version)
+      val diff = new SnapshotDiff(version, IOService.getUncompressedDiffDir(version))
+      val dstDir = IOService.getMinimalUncompressedVersionDir(version)
+      //copy created files
+      diff.createdDatasetFiles.foreach(f => {
+        val dst = new File(dstDir + "/" + f.getName)
+        java.nio.file.Files.copy(f.toPath, dst.toPath)
+      })
+      logger.debug("finished copying created files")
+      //TODO: create a list of deleted files (?) - would be an integrity check only
+      //patch changed files
+      diff.diffFiles.foreach(diffFile => {
+        //find latest version:
+        val srcFile = getLatestVersionBefore(version, IOService.filenameToID(diffFile)) //TODO: weird output here+ IOService.filenameToID(diffFile)
+        diffCalculator.patchFile(dstDir, diffFile, srcFile.getName, srcFile.getAbsolutePath)
+      })
+      logger.debug(s"Finished minimal snapshot restore for version $version")
+    }
+  }
+
+  def getLatestVersionBefore(version: LocalDate, id: String) = {
+    val versions = IOService.getSortedMinimalUmcompressedVersions
+      .filter(v => {
+      val containsFileID = IOService.getMinimalUncompressedVersionDir(v)
+        .listFiles()
+        .map(IOService.filenameToID(_))
+        .contains(id)
+      v.toEpochDay < version.toEpochDay && containsFileID
+    })
+    new File(s"${IOService.getMinimalUncompressedVersionDir(versions.last).getAbsolutePath}/$id.json?")
   }
 
   def restoreFullSnapshotFromDiff(version:LocalDate, targetDir:Option[File] = None,recursivelyRestoreSnapshots:Boolean = false):Unit = {

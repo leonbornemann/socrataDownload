@@ -3,6 +3,7 @@ package de.hpi.dataset_versioning.io
 import java.io.{File, FileInputStream, FileOutputStream, StringReader}
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
 import java.util.zip.{ZipEntry, ZipInputStream}
 
 import com.google.gson.JsonParser
@@ -13,6 +14,7 @@ import de.hpi.dataset_versioning.data.metadata.DatasetMetadata
 import de.hpi.dataset_versioning.data.metadata.custom.{CustomMetadata, CustomMetadataCollection}
 import de.hpi.dataset_versioning.data.parser.JsonDataParser
 import de.hpi.dataset_versioning.matching.DatasetInstance
+import org.joda.time.Days
 
 import scala.sys.process._
 import scala.collection.mutable
@@ -20,6 +22,43 @@ import scala.io.Source
 import scala.reflect.io.Directory
 
 object IOService extends StrictLogging{
+
+
+
+  def shouldBeCheckpoint(version: LocalDate): Boolean = {
+    val checkpoints = getCheckpoints
+    val firstVersion = checkpoints(0)
+    version ==firstVersion || ChronoUnit.DAYS.between(firstVersion,version) % 7==0
+  }
+
+
+  var socrataDir:String = null
+  val dateTimeFormatter = DateTimeFormatter.ISO_LOCAL_DATE
+  val cachedMetadata = mutable.Map[LocalDate,mutable.Map[String,DatasetMetadata]]() //TODO: shrink this cache at some point - use caching library?: https://stackoverflow.com/questions/3651313/how-to-cache-results-in-scala
+  val cachedCustomMetadata = mutable.Map[LocalDate,Map[String,CustomMetadata]]() //TODO: shrink this cache at some point - use caching library?: https://stackoverflow.com/questions/3651313/how-to-cache-results-in-scala
+  val datasetCache = mutable.Map[DatasetInstance,LoadedRelationalDataset]()
+
+  def DATA_DIR = socrataDir + "/data/"
+  def METADATA_DIR = socrataDir + "/metadata/"
+  def SNAPSHOT_METADATA_DIR = socrataDir + "/snapshotMetadata/"
+  def DIFF_DIR = socrataDir + "/diff/"
+  def WORKING_DIR:String = socrataDir + "/workingDir/"
+  def VERSION_HISTORY_METADATA_DIR = socrataDir + "/versionHistory/"
+  def DATA_DIR_UNCOMPRESSED = WORKING_DIR + "/snapshots/"
+  def DIFF_DIR_UNCOMPRESSED = WORKING_DIR + "/diffs/"
+  def MINIMAL_UNCOMPRESSED_DATA_DIR = WORKING_DIR + "/minimalHistory/"
+
+  def getUncompressedDiffDir(date: LocalDate) = createAndReturn(new File(DIFF_DIR_UNCOMPRESSED + date.format(dateTimeFormatter) + "_diff"))
+  def getUncompressedDataDir(date: LocalDate) = createAndReturn(new File(DATA_DIR_UNCOMPRESSED + date.format(dateTimeFormatter)))
+  def getMinimalUncompressedVersionDir(v: LocalDate) = createAndReturn(new File(MINIMAL_UNCOMPRESSED_DATA_DIR + v.format(dateTimeFormatter)))
+  def getSnapshotMetadataDir(date: LocalDate) = createAndReturn(new File(SNAPSHOT_METADATA_DIR + date.format(dateTimeFormatter)))
+
+  def extractDataToMinimalWorkingDir(date: LocalDate) = {
+    logger.debug(s"Extracting Data to minimal Working Dir for version $date")
+    val zipFile: File = getCompressedDataFile(date)
+    val subDirectory = new File(MINIMAL_UNCOMPRESSED_DATA_DIR + filenameWithoutFiletype(zipFile))
+    extractZipFile(zipFile, subDirectory)
+  }
 
   def saveDeleteCompressedDataFile(version: LocalDate): Unit = {
     //check if we can safely delete this
@@ -43,13 +82,6 @@ object IOService extends StrictLogging{
       }
     }
   }
-
-
-  var socrataDir:String = null
-  val dateTimeFormatter = DateTimeFormatter.ISO_LOCAL_DATE
-  val cachedMetadata = mutable.Map[LocalDate,mutable.Map[String,DatasetMetadata]]() //TODO: shrink this cache at some point - use caching library?: https://stackoverflow.com/questions/3651313/how-to-cache-results-in-scala
-  val cachedCustomMetadata = mutable.Map[LocalDate,Map[String,CustomMetadata]]() //TODO: shrink this cache at some point - use caching library?: https://stackoverflow.com/questions/3651313/how-to-cache-results-in-scala
-  val datasetCache = mutable.Map[DatasetInstance,LoadedRelationalDataset]()
 
   def cacheCustomMetadata(version: LocalDate) = {
     val mdColelction = CustomMetadataCollection.fromJsonFile(IOService.getCustomMetadataFile(version).getAbsolutePath)
@@ -75,6 +107,7 @@ object IOService extends StrictLogging{
   def compressedDiffExists(version: LocalDate) = getCompressedDiffFile(version).exists()
   def uncompressedSnapshotExists(version: LocalDate) = getUncompressedDataDir(version).exists() && !getUncompressedDataDir(version).listFiles().isEmpty
   def uncompressedDiffExists(version: LocalDate) = getUncompressedDiffDir(version).exists() && !getUncompressedDiffDir(version).listFiles().isEmpty
+  def minimalUncompressedVersionDirExists(version: LocalDate): Boolean = getMinimalUncompressedVersionDir(version).exists() && !getMinimalUncompressedVersionDir(version).listFiles().isEmpty
   def snapshotExists(date: LocalDate) = compressedSnapshotExists(date) || uncompressedSnapshotExists(date)
   def diffExists(version: LocalDate): Boolean = uncompressedDiffExists(version) || compressedDiffExists(version)
 
@@ -84,11 +117,15 @@ object IOService extends StrictLogging{
   def jsonFilenameFromID(id: String): String = id + ".json?"
   private val jsonParser = new JsonDataParser
 
-  def loadDataset(datasetInstance: DatasetInstance,skipParseExceptions:Boolean = false) = {
+  def loadDataset(datasetInstance: DatasetInstance,skipParseExceptions:Boolean = false,useMinimalWorkingDir:Boolean=false) = {
     if(datasetCache.contains(datasetInstance))
       datasetCache(datasetInstance)
     else {
-      val subDirectory = new File(DATA_DIR_UNCOMPRESSED + datasetInstance.date.format(dateTimeFormatter) + "/")
+      var subDirectory:File = null
+      if(useMinimalWorkingDir)
+        subDirectory = new File(MINIMAL_UNCOMPRESSED_DATA_DIR + datasetInstance.date.format(dateTimeFormatter) + "/")
+      else
+        subDirectory = new File(DATA_DIR_UNCOMPRESSED + datasetInstance.date.format(dateTimeFormatter) + "/")
       if (!subDirectory.exists())
         throw new AssertionError(s"${subDirectory} must be extracted to working directory first")
       val datasetFile = new File(subDirectory.getAbsolutePath + "/" + jsonFilenameFromID(datasetInstance.id))
@@ -110,12 +147,8 @@ object IOService extends StrictLogging{
     }
   }
 
-  def tryLoadDataset(datasetInstance:DatasetInstance) = {
-    loadDataset(datasetInstance,true)
-  }
-
-  def tryLoadDataset(file:File,version:LocalDate) = {
-    loadDataset(new DatasetInstance(filenameToID(file),version),true)
+  def tryLoadDataset(datasetInstance:DatasetInstance,minimal:Boolean=false) = {
+    loadDataset(datasetInstance,true,minimal)
   }
 
   def tryLoadDataset(id:String,version:LocalDate) = {
@@ -139,15 +172,6 @@ object IOService extends StrictLogging{
 
   def filenameToID(f: File): String = filenameWithoutFiletype(f)
 
-  def DATA_DIR = socrataDir + "/data/"
-  def METADATA_DIR = socrataDir + "/metadata/"
-  def SNAPSHOT_METADATA_DIR = socrataDir + "/snapshotMetadata/"
-  def DIFF_DIR = socrataDir + "/diff/"
-  def WORKING_DIR:String = socrataDir + "/workingDir/"
-  def VERSION_HISTORY_METADATA_DIR = socrataDir + "/versionHistory/"
-  def DATA_DIR_UNCOMPRESSED = WORKING_DIR + "/snapshots/"
-  def DIFF_DIR_UNCOMPRESSED = WORKING_DIR + "/diffs/"
-
   private def filenameWithoutFiletype(f: File) = {
     f.getName.split("\\.")(0)
   }
@@ -169,11 +193,6 @@ object IOService extends StrictLogging{
     if(!file.exists()) file.mkdirs()
     file
   }
-
-  //def getDiffDirForDate(date: LocalDate): File = new File(DIFF_DIR + date.format(dateTimeFormatter) + "_diff")
-  def getUncompressedDiffDir(date: LocalDate) = createAndReturn(new File(DIFF_DIR_UNCOMPRESSED + date.format(dateTimeFormatter) + "_diff"))
-  def getUncompressedDataDir(date: LocalDate) = createAndReturn(new File(DATA_DIR_UNCOMPRESSED + date.format(dateTimeFormatter)))
-  def getSnapshotMetadataDir(date: LocalDate) = createAndReturn(new File(SNAPSHOT_METADATA_DIR + date.format(dateTimeFormatter)))
 
   private def compressToFile(sourceDir: File,targetDir:File) = {
     logger.debug(s"Compressing data from ${sourceDir.getAbsolutePath} to ${targetDir.getAbsolutePath}")
@@ -210,11 +229,11 @@ object IOService extends StrictLogging{
   }
 
   private def extractZipFile(zipFile: File, subDirectory: File) = {
-    if (subDirectory.exists()) {
+    if (subDirectory.exists() && !subDirectory.listFiles.isEmpty) {
       logger.warn(s"subdirectory ${subDirectory.getAbsolutePath} already exists, skipping .zip extraction")
       subDirectory.listFiles().toSet
     } else {
-      assert(!subDirectory.exists())
+      //assert(!subDirectory.exists())
       subDirectory.mkdir()
       assert(zipFile.getName.endsWith(".zip"))
       val buffer = new Array[Byte](1024)
@@ -302,6 +321,13 @@ object IOService extends StrictLogging{
     dates.toSet
       .toIndexedSeq
       .sortBy((t:LocalDate) => t.toEpochDay)
+  }
+
+  def getSortedMinimalUmcompressedVersions = {
+    new File(MINIMAL_UNCOMPRESSED_DATA_DIR)
+      .listFiles()
+      .map(f => LocalDate.parse(f.getName.split("_")(0), dateTimeFormatter))
+      .sortBy(_.toEpochDay)
   }
 
   def getCheckpoints() = (getSortedUncompressedSnapshots ++ getSortedZippedDatalakeSnapshots)

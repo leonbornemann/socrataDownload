@@ -18,7 +18,7 @@ object IdentifierMapping extends StrictLogging{
     columnContentUniqunessFile.println("dsIDstr,dsIdInt,colname,colID,uniqueness")
     var count = 0
     files.foreach(f => {
-      val ds = IOService.tryLoadDataset(f,version)
+      val ds = IOService.tryLoadDataset(IOService.filenameToID(f),version)
       if(!ds.erroneous){
         ds.colNames.zipWithIndex.foreach{case (colname,colID) => {
           val col = ds.getColumnObject(colID)

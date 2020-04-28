@@ -36,7 +36,11 @@ object JoinAnalysisMain extends App with StrictLogging{
     logger.debug("to")
     logger.debug(a(joined.id).resource.name + s"(${a(joined.id).link})")
     joined.print()
-    logger.debug("")
+    println()
+    println()
+    println()
+    println()
+    println()
   })
 
 }

@@ -101,6 +101,7 @@ class DiffManager(daysBetweenCheckpoints:Int=7) extends StrictLogging{
       })
       logger.debug(s"Finished minimal snapshot restore for version $version")
     }
+    IOService.getMinimalUncompressedVersionDir(version).listFiles
   }
 
   def getLatestVersionBefore(version: LocalDate, id: String) = {

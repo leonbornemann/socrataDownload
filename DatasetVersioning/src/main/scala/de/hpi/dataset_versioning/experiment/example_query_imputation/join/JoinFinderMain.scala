@@ -10,5 +10,5 @@ object JoinFinderMain extends App {
   val version = LocalDate.parse(args(1),IOService.dateTimeFormatter)
   IOService.cacheMetadata(version)
   val projectionFinder = new QueryRelationshipDiscoverer(version)
-  projectionFinder.findJoins(version)
+  //TODO: redo: projectionFinder.findJoins(version)
 }

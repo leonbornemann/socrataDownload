@@ -3,10 +3,11 @@ package de.hpi.dataset_versioning.matching
 import java.io.File
 import java.time.LocalDate
 
+import de.hpi.dataset_versioning.data.JsonWritable
 import de.hpi.dataset_versioning.data.metadata.DatasetMetadata
 import de.hpi.dataset_versioning.io.IOService
 
-class DatasetInstance(val id:String, val date:LocalDate) {
+case class DatasetInstance(val id:String, val date:LocalDate) extends Serializable {
 
   var datasetMetadata:Option[DatasetMetadata] = None
 

@@ -3,7 +3,7 @@ package de.hpi.dataset_versioning.data
 import java.io.{File, FileInputStream}
 
 import de.hpi.dataset_versioning.data.metadata.Provenance
-import de.hpi.dataset_versioning.data.metadata.custom.ColumnDatatype
+import de.hpi.dataset_versioning.data.metadata.custom.{ColumnDatatype, DatasetInstanceKeySerializer}
 import org.json4s.jackson.JsonMethods.parse
 import org.json4s.{DefaultFormats, _}
 import org.json4s.ext.EnumNameSerializer
@@ -12,7 +12,7 @@ import scala.io.Source
 
 trait JsonReadable[T<:AnyRef] {
 
-  implicit val formats = DefaultFormats + new EnumNameSerializer(Provenance) + new EnumNameSerializer(ColumnDatatype) + LocalDateSerializer
+  implicit val formats = DefaultFormats + new EnumNameSerializer(Provenance) + new EnumNameSerializer(ColumnDatatype) + LocalDateSerializer + DatasetInstanceKeySerializer
 
 
   def fromJsonString(json: String)(implicit m:Manifest[T]) = {

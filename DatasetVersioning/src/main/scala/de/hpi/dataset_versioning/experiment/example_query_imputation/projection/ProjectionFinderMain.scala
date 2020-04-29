@@ -10,5 +10,5 @@ object ProjectionFinderMain extends App {
   val version = LocalDate.parse(args(1),IOService.dateTimeFormatter)
   IOService.cacheMetadata(version)
   val projectionFinder = new QueryRelationshipDiscoverer(version)
-  projectionFinder.findProjections(version)
+  //TODO: redo: projectionFinder.findProjections(version)
 }

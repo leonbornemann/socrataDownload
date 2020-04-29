@@ -13,6 +13,7 @@ import de.hpi.dataset_versioning.data.LoadedRelationalDataset
 import de.hpi.dataset_versioning.data.metadata.DatasetMetadata
 import de.hpi.dataset_versioning.data.metadata.custom.{CustomMetadata, CustomMetadataCollection}
 import de.hpi.dataset_versioning.data.parser.JsonDataParser
+import de.hpi.dataset_versioning.io.diff.DiffManager
 import de.hpi.dataset_versioning.matching.DatasetInstance
 import org.joda.time.Days
 
@@ -23,6 +24,22 @@ import scala.reflect.io.Directory
 
 object IOService extends StrictLogging{
 
+  def extractMinimalHistoryInRange(startVersion: LocalDate, endVersion: LocalDate) = {
+    var files = mutable.HashSet[(LocalDate,File)]()
+    var curDate = startVersion
+    if(startVersion == IOService.getSortedDatalakeVersions().head) {
+      files ++= extractDataToMinimalWorkingDir(startVersion)
+          .map(f => (startVersion,f))
+      curDate = curDate.plusDays(1)
+    }
+    val diffManager = new DiffManager()
+    while(curDate.toEpochDay <= endVersion.toEpochDay){
+      files ++= diffManager.restoreMinimalSnapshot(curDate)
+        .map(f => (curDate,f))
+      curDate = curDate.plusDays(1)
+    }
+    files
+  }
 
 
   def shouldBeCheckpoint(version: LocalDate): Boolean = {
@@ -35,7 +52,7 @@ object IOService extends StrictLogging{
   var socrataDir:String = null
   val dateTimeFormatter = DateTimeFormatter.ISO_LOCAL_DATE
   val cachedMetadata = mutable.Map[LocalDate,mutable.Map[String,DatasetMetadata]]() //TODO: shrink this cache at some point - use caching library?: https://stackoverflow.com/questions/3651313/how-to-cache-results-in-scala
-  val cachedCustomMetadata = mutable.Map[LocalDate,Map[String,CustomMetadata]]() //TODO: shrink this cache at some point - use caching library?: https://stackoverflow.com/questions/3651313/how-to-cache-results-in-scala
+  val cachedCustomMetadata = mutable.Map[(LocalDate,LocalDate),CustomMetadataCollection]() //TODO: shrink this cache at some point - use caching library?: https://stackoverflow.com/questions/3651313/how-to-cache-results-in-scala
   val datasetCache = mutable.Map[DatasetInstance,LoadedRelationalDataset]()
 
   def DATA_DIR = socrataDir + "/data/"
@@ -83,9 +100,9 @@ object IOService extends StrictLogging{
     }
   }
 
-  def cacheCustomMetadata(version: LocalDate) = {
-    val mdColelction = CustomMetadataCollection.fromJsonFile(IOService.getCustomMetadataFile(version).getAbsolutePath)
-    cachedCustomMetadata(version) = mdColelction.metadata
+  def cacheCustomMetadata(startVersion: LocalDate,endVersion:LocalDate) = {
+    val mdColelction = CustomMetadataCollection.fromJsonFile(IOService.getCustomMetadataFile(startVersion,endVersion).getAbsolutePath)
+    cachedCustomMetadata((startVersion,endVersion)) = mdColelction
   }
 
   def clearUncompressedSnapshot(date: LocalDate) = new Directory(getUncompressedDataDir(date)).deleteRecursively() //TODO: existance checks?
@@ -177,12 +194,10 @@ object IOService extends StrictLogging{
   }
 
   //snapshotMetadataFiles:
-  def getJoinabilityGraphFile(date:LocalDate) = new File(SNAPSHOT_METADATA_DIR + date.format(dateTimeFormatter) + "/smallJoinabilityGraph.csv")
-  def getDatasetIdMappingFile(date: LocalDate) = new File(SNAPSHOT_METADATA_DIR + date.format(dateTimeFormatter) + "/dsIDMap.csv")
-  def getColumnIdMappingFile(date:LocalDate) = new File(SNAPSHOT_METADATA_DIR + date.format(dateTimeFormatter) + "/columnIDMap.csv")
+  def getJoinabilityGraphFile(startVersion:LocalDate,endVersion:LocalDate) = new File(SNAPSHOT_METADATA_DIR + "/smallJoinabilityGraph_" + startVersion.format(dateTimeFormatter) + "_" + endVersion.format(dateTimeFormatter) + ".csv")
   def getInferredProjectionFile(date: LocalDate) = new File(SNAPSHOT_METADATA_DIR + date.format(dateTimeFormatter) + "/inferredProjections.csv")
   def getInferredJoinFile(date: LocalDate) = new File(SNAPSHOT_METADATA_DIR + date.format(dateTimeFormatter) + "/inferredJoins.csv")
-  def getCustomMetadataFile(date: LocalDate) = new File(SNAPSHOT_METADATA_DIR + date.format(dateTimeFormatter) + "/customMetadata.json")
+  def getCustomMetadataFile(startVersion: LocalDate,endVersion:LocalDate) = new File(SNAPSHOT_METADATA_DIR + "customMetadata_" + startVersion.format(dateTimeFormatter) + "_" + endVersion.format(dateTimeFormatter) + ".json")
   def getVersionHistoryFile() = new File(VERSION_HISTORY_METADATA_DIR + "/datasetVersionHistory.csv")
   //data and diff files
   def getCompressedDataFile(date: LocalDate): File = new File(DATA_DIR + date.format(dateTimeFormatter) + ".zip")

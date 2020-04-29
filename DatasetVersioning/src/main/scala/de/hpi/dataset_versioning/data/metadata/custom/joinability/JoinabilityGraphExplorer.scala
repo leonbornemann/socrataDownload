@@ -4,59 +4,44 @@ import java.io.{File, PrintWriter}
 import java.time.LocalDate
 
 import com.typesafe.scalalogging.StrictLogging
-import de.hpi.dataset_versioning.data.metadata.custom.IdentifierMapping
 import de.hpi.dataset_versioning.io.IOService
+import de.hpi.dataset_versioning.matching.DatasetInstance
 
 import scala.io.Source
 
 class JoinabilityGraphExplorer() extends StrictLogging {
 
-  def createManualLookupTests(version:LocalDate,joinablilityGraphFileExcerpt:File, dsIDMapFile:File, colIDMapFile:File,outputDir:File) = {
-    //scrDSID,scrColID,targetDSID,targetColID,highestThreshold,highestUniqueness
-    val edges = Source.fromFile(joinablilityGraphFileExcerpt).getLines().toSeq
-      .map(JoinabilityGraphEdge.create(_))
-    val dsNameToID = IdentifierMapping.readDatasetIDMapping_intToString(dsIDMapFile)
-    val dsIDColNameToColID = IdentifierMapping.readColumnIDMapping_shortToString(colIDMapFile)
-    edges.foreach( e => {
-      val ds1Name = dsNameToID(e.scrDSID)
-      val ds2Name = dsNameToID(e.targetDSID)
-      val ds1ColName = dsIDColNameToColID((e.scrDSID,e.scrColID))
-      val ds2ColName = dsIDColNameToColID((e.targetDSID,e.targetColID))
-      val newDir = new File(outputDir.getAbsolutePath + s"/$ds1Name.${ds1ColName}_to_$ds2Name.$ds2ColName")
-      newDir.mkdir()
-      val ds1 = IOService.tryLoadDataset(ds1Name,version)
-      val ds2 = IOService.tryLoadDataset(ds2Name,version)
-      ds1.exportToCSV(new File(newDir.getAbsolutePath + s"/$ds1Name.${ds1ColName}" + ".csv"))
-      ds2.exportToCSV(new File(newDir.getAbsolutePath + s"/$ds2Name.${ds2ColName}" + ".csv"))
-    })
-  }
-
-  def transformToSmallRepresentation(joinablilityGraphFileOld:File, dsIDMapFile:File, colIDMapFile:File,joinablilityGraphFileNew:File) = {
+  def transformToSmallRepresentation(startVersion:LocalDate,endVersion:LocalDate,joinablilityGraphFileOld:File) = {
     val lineIterator = Source.fromFile(joinablilityGraphFileOld).getLines()
-    val dsNameToID = IdentifierMapping.readDatasetIDMapping_stringToInt(dsIDMapFile)
-    val dsIDColNameToColID = IdentifierMapping.readColumnIDMapping_stringToShort(colIDMapFile)
+    IOService.cacheCustomMetadata(startVersion,endVersion)
+    val mdCollection = IOService.cachedCustomMetadata((startVersion,endVersion)).metadata
     val thresholds = Seq(0.8f,0.9f,1.0f)
     lineIterator.next()
+    val joinablilityGraphFileNew = IOService.getJoinabilityGraphFile(startVersion,endVersion)
     val pr = new PrintWriter(joinablilityGraphFileNew)
     var count = 0
     var errCount = 0
     var dsErrCount = 0
-    pr.println("scrDSID,scrColID,targetDSID,targetColID,containmentOfSrcInTarget,maxUniqueness")
+    pr.println("scrDSID,srcDSDate,scrColID,targetDSID,targetDSDate,targetColID,containmentOfSrcInTarget,maxUniqueness")
     while(lineIterator.hasNext){
       val tokens = lineIterator.next().split(",")
       assert(tokens.size==9)
-      val (sourceTable,sourceAttr,targetTable,targetAttr) = (tokens(0),tokens(2),tokens(3),tokens(5))
+      val (sourceTable,sourceDate,sourceAttr,targetTable,targetDate,targetAttr) = (tokens(0),LocalDate.parse(tokens(1),IOService.dateTimeFormatter),tokens(2),tokens(3),LocalDate.parse(tokens(4),IOService.dateTimeFormatter),tokens(5))
       val existsAtThreshold = tokens.slice(6,tokens.size).map(_.toBoolean)
       val index = existsAtThreshold.lastIndexOf(true)
       if(index != -1) {
         val highestThreshold = thresholds(index)
-        if(dsNameToID.contains(sourceTable) && dsNameToID.contains(targetTable)) {
-          val (srcID, targetID) = (dsNameToID(sourceTable), dsNameToID(targetTable))
-          if (dsIDColNameToColID.contains((srcID, sourceAttr)) && dsIDColNameToColID.contains(targetID, targetAttr)) {
-            val (srcColID, srcUniqueness) = dsIDColNameToColID((srcID, sourceAttr))
-            val (targetColID, targetUniqueness) = dsIDColNameToColID((targetID, targetAttr))
-            val maxUniqueness = Math.max(srcUniqueness, targetUniqueness)
-            pr.println(s"$srcID,$srcColID,$targetID,$targetColID,$highestThreshold,$maxUniqueness")
+        if(mdCollection.contains(DatasetInstance(sourceTable,sourceDate)) && mdCollection.contains(DatasetInstance(targetTable,targetDate))) {
+          val srcMetadata = mdCollection(DatasetInstance(sourceTable,sourceDate))
+          val targetMetadata = mdCollection(DatasetInstance(targetTable,targetDate))
+          val (srcID, targetID) = (srcMetadata.intID, targetMetadata.intID)
+          if (srcMetadata.columnMetadata.contains(sourceAttr) && targetMetadata.columnMetadata.contains(targetAttr)) {
+            val srcColMetadata = srcMetadata.columnMetadata(sourceAttr)
+            val targetColMetadata = targetMetadata.columnMetadata(targetAttr)
+            val srcColID = srcColMetadata.shortID
+            val targetColID = targetColMetadata.shortID
+            val maxUniqueness = Math.max(srcColMetadata.uniqueness, targetColMetadata.uniqueness)
+            pr.println(s"$srcID,${sourceDate.format(IOService.dateTimeFormatter)},$srcColID,$targetID,${targetDate.format(IOService.dateTimeFormatter)},$targetColID,$highestThreshold,$maxUniqueness")
           } else {
             errCount += 1
           }
@@ -84,16 +69,16 @@ class JoinabilityGraphExplorer() extends StrictLogging {
     logger.debug("continuing")
   }
 
-  def exploreGraphMemory(version:LocalDate) = {
+  def exploreGraphMemory(startVersion:LocalDate,endVersion:LocalDate) = {
     logger.debug("Nothing loaded - press enter to start")
     val a = scala.io.StdIn.readLine()
     logger.debug("loading filtered graph")
-    var graph = JoinabilityGraph.readGraphFromGoOutput(IOService.getJoinabilityGraphFile(version),1.0f)
+    var graph = JoinabilityGraph.readGraphFromGoOutput(IOService.getJoinabilityGraphFile(startVersion,endVersion),1.0f)
     exploreGraph(graph)
     graph = null
     System.gc()
     logger.debug("loading unfiltered graph")
-    graph = JoinabilityGraph.readGraphFromGoOutput(IOService.getJoinabilityGraphFile(version))
+    graph = JoinabilityGraph.readGraphFromGoOutput(IOService.getJoinabilityGraphFile(startVersion,endVersion))
     exploreGraph(graph)
 
   }

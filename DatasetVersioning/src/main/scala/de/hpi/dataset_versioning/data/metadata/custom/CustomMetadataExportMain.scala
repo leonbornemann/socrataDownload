@@ -4,17 +4,20 @@ import java.time.LocalDate
 
 import com.typesafe.scalalogging.StrictLogging
 import de.hpi.dataset_versioning.io.IOService
+import de.hpi.dataset_versioning.matching.DatasetInstance
 
 import scala.collection.mutable.HashMap
 
 object CustomMetadataExportMain extends App with StrictLogging{
 
   IOService.socrataDir = args(0)
-  val version = LocalDate.parse(args(1),IOService.dateTimeFormatter)
+  val startVersion = LocalDate.parse(args(1),IOService.dateTimeFormatter)
+  val endVersion = LocalDate.parse(args(2),IOService.dateTimeFormatter)
   //read
+  export()
 
   private def read = {
-    val mdColelction = CustomMetadataCollection.fromJsonFile(IOService.getCustomMetadataFile(version).getAbsolutePath)
+    val mdColelction = CustomMetadataCollection.fromJsonFile(IOService.getCustomMetadataFile(startVersion,endVersion).getAbsolutePath)
     val histogram = mdColelction.metadata.values.groupBy(_.tupleSpecificHash)
       .mapValues(_.size)
       .values.toSeq
@@ -24,23 +27,22 @@ object CustomMetadataExportMain extends App with StrictLogging{
   }
 
   def export() = {
-    val files = IOService.extractDataToWorkingDir(version)
-    val metadataCollection = HashMap[String,CustomMetadata]()
-    var count = 0
-    files.foreach(f => {
-      val ds = IOService.tryLoadDataset(IOService.filenameToID(f),version)
+    val files = IOService.extractMinimalHistoryInRange(startVersion,endVersion)
+    val metadataCollection = HashMap[DatasetInstance,CustomMetadata]()
+    var intID = 0
+    files.foreach{case (v,f) => {
+      val ds = IOService.tryLoadDataset(new DatasetInstance(IOService.filenameToID(f),v),true)
       if(!ds.isEmpty){
-        val md = ds.extractCustomMetadata
-        metadataCollection.put(IOService.filenameToID(f),md)
+        val md = ds.extractCustomMetadata(intID)
+        metadataCollection.put(DatasetInstance(IOService.filenameToID(f),v),md)
       }
-      count +=1
-      if(count%1000 == 0)
-        logger.debug(s"finished $count")
-    })
-    CustomMetadataCollection(metadataCollection.toMap).toJsonFile(IOService.getCustomMetadataFile(version))
+      intID +=1
+      if(intID%1000 == 0)
+        logger.debug(s"finished $intID")
+    }}
+    CustomMetadataCollection(metadataCollection.toMap).toJsonFile(IOService.getCustomMetadataFile(startVersion,endVersion))
   }
 
-  export()
 
 
 }

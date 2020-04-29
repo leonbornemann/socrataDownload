@@ -76,12 +76,14 @@ class LoadedRelationalDataset(val id:String, val version:LocalDate, val rows:Arr
     tupleMultiset.hashCode()
   }
 
-  def extractCustomMetadata = {
+  def extractCustomMetadata(intID:Int) = {
     calculateColumnMetadata()
-    CustomMetadata(id,version.format(IOService.dateTimeFormatter),rows.size,getSchemaSpecificHashValue,getTupleSpecificHash,columnMetadata.toMap)
+    CustomMetadata(id,intID,version,rows.size,getSchemaSpecificHashValue,getTupleSpecificHash,columnMetadata.toMap)
   }
 
-  def join(other: LoadedRelationalDataset, myJoinCol: String, otherJoinCol: String,variant:JoinConstructionVariant):LoadedRelationalDataset = {
+  def join(other: LoadedRelationalDataset, myJoinColIndex: Short, otherJoinColIndex: Short,variant:JoinConstructionVariant):LoadedRelationalDataset = {
+    val myJoinCol = colNames(myJoinColIndex)
+    val otherJoinCol = other.colNames(otherJoinColIndex)
     val joinDataset = new LoadedRelationalDataset(id + s"_joinedOn($myJoinCol,$otherJoinCol)_with_" +other.id ,version)
     if(variant == JoinConstructionVariant.KeepBoth) {
       joinDataset.colNames = colNames ++ other.colNames
@@ -94,8 +96,6 @@ class LoadedRelationalDataset(val id:String, val version:LocalDate, val rows:Arr
     joinDataset.erroneous = erroneous || other.erroneous
     joinDataset.containsArrays = containsArrays || other.containsArrays
     joinDataset.containedNestedObjects = containedNestedObjects | other.containedNestedObjects
-    val otherJoinColIndex = other.colNames.indexOf(otherJoinCol)
-    val myJoinColIndex = colNames.indexOf(myJoinCol)
     val byKey = other.rows.groupBy(c => getCellValueAsString(c(otherJoinColIndex)))
     rows.foreach(r => {
       val valueInJoinColumn = getCellValueAsString(r(myJoinColIndex))
@@ -114,11 +114,25 @@ class LoadedRelationalDataset(val id:String, val version:LocalDate, val rows:Arr
   }
 
 
+  def isSorted(colNames: IndexedSeq[String]): Boolean = {
+    var sorted = true
+    var it = colNames.iterator
+    var prev = it.next()
+    while(it.hasNext && sorted){
+      val cur = it.next()
+      if(cur < prev)
+        sorted = false
+      prev = cur
+    }
+    sorted
+  }
+
   def calculateColumnMetadata() = {
+    assert(isSorted(colNames))
     columnMetadata.clear()
     columnMetadata ++= (0 until ncols).map(i => {
       val curColObject = getColumnObject(i)
-      (colNames(i),ColumnCustomMetadata(colNames(i),curColObject.valueMultiSet.hashCode(),curColObject.uniqueness(),curColObject.dataType()))
+      (colNames(i),ColumnCustomMetadata(colNames(i),i.toShort,curColObject.valueMultiSet.hashCode(),curColObject.uniqueness(),curColObject.dataType()))
     })
   }
 

@@ -27,6 +27,7 @@ object CustomMetadataExportMain extends App with StrictLogging{
   }
 
   def export() = {
+    //TODO: make this part of a date range
     val files = IOService.extractMinimalHistoryInRange(startVersion,endVersion)
     val metadataCollection = HashMap[DatasetInstance,CustomMetadata]()
     var intID = 0

@@ -17,15 +17,28 @@ import de.hpi.dataset_versioning.util.TableFormatter
 import scala.collection.JavaConverters._
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
+import scala.io.Source
 
 class LoadedRelationalDataset(val id:String, val version:LocalDate, val rows:ArrayBuffer[IndexedSeq[JsonElement]]=ArrayBuffer()) extends StrictLogging{
+
+  def isProjectionOf(other: LoadedRelationalDataset, columnMapping: mutable.HashMap[String, String]): Boolean = {
+    if(other.ncols < ncols || columnMapping.size!=ncols)
+      false
+    else{
+      val colRenames = columnMapping.values
+        .toIndexedSeq
+        .map(s => (s,s))
+      val otherProjected = other.getProjection(other.id + "_projection",colRenames)
+      isEqualTo(otherProjected,columnMapping)
+    }
+  }
 
   def getRowMultiSet = rows.groupBy(identity)
     .mapValues(_.size)
 
-  def isEqualTo(other: LoadedRelationalDataset, mapping: mutable.HashMap[String, String]): Boolean = {
+  def isEqualTo(other: LoadedRelationalDataset, columnMapping: mutable.HashMap[String, String]): Boolean = {
     //we need to compare all tuples in the order specified by the mapping
-    if(other.ncols != ncols || mapping.size!=ncols)
+    if(other.ncols != ncols || columnMapping.size!=ncols)
       false
     else {
       val tuplesToMatch = mutable.HashMap() ++ other.getRowMultiSet
@@ -37,7 +50,7 @@ class LoadedRelationalDataset(val id:String, val version:LocalDate, val rows:Arr
         val curRowInOtherOrder = mutable.IndexedSeq.fill[JsonElement](curRow.size)(JsonNull.INSTANCE)
         (0 until curRow.size).foreach(myColIndex => {
           val myColName = colNames(myColIndex)
-          val otherColIndex = otherColNameToIndex(mapping(myColName))
+          val otherColIndex = otherColNameToIndex(columnMapping(myColName))
           curRowInOtherOrder(otherColIndex) = curRow(myColIndex)
         })
         val countInOtherDS = tuplesToMatch.getOrElse(curRowInOtherOrder, 0)
@@ -61,7 +74,7 @@ class LoadedRelationalDataset(val id:String, val version:LocalDate, val rows:Arr
 
   def getTupleSpecificHash: Int = {
     val tupleMultiset = toMultiset(rows
-      .map(tuple => toMultiset(tuple.map(getCellValueAsString(_)))))
+      .map(tuple => toMultiset(tuple.map(LoadedRelationalDataset.getCellValueAsString(_)))))
       /*.sorted(new Ordering[Seq[String]] {
       override def compare(x: Seq[String], y: Seq[String]): Int = {
         val it = x.zip(y).iterator
@@ -81,33 +94,38 @@ class LoadedRelationalDataset(val id:String, val version:LocalDate, val rows:Arr
     CustomMetadata(id,intID,version,rows.size,getSchemaSpecificHashValue,getTupleSpecificHash,columnMetadata.toMap)
   }
 
-  def join(other: LoadedRelationalDataset, myJoinColIndex: Short, otherJoinColIndex: Short,variant:JoinConstructionVariant):LoadedRelationalDataset = {
+  def constructRow(r1: IndexedSeq[JsonElement], ds1: LoadedRelationalDataset, r2: IndexedSeq[JsonElement], ds2: LoadedRelationalDataset, newColumnOrder: IndexedSeq[(String, Int, LoadedRelationalDataset)]): IndexedSeq[JsonElement] = {
+    val newRow = newColumnOrder.map{case (_,i,sourceDS) =>{
+      if(sourceDS==ds1)
+        r1(i)
+      else if(sourceDS==ds2)
+        r2(i)
+      else
+        throw new AssertionError("weird")
+    }}
+    newRow
+  }
+
+  def join(other: LoadedRelationalDataset, myJoinColIndex: Short, otherJoinColIndex: Short, variant:JoinConstructionVariant):LoadedRelationalDataset = {
+    if(variant!=JoinConstructionVariant.KeepBoth)
+      throw new AssertionError(s"$variant no longer supported ")
     val myJoinCol = colNames(myJoinColIndex)
     val otherJoinCol = other.colNames(otherJoinColIndex)
     val joinDataset = new LoadedRelationalDataset(id + s"_joinedOn($myJoinCol,$otherJoinCol)_with_" +other.id ,version)
-    if(variant == JoinConstructionVariant.KeepBoth) {
-      joinDataset.colNames = colNames ++ other.colNames
-    } else if (variant == JoinConstructionVariant.KeepLeft){
-      joinDataset.colNames = colNames ++ other.colNames.filter(_ != otherJoinCol)
-    } else{
-      joinDataset.colNames = colNames.filter(_ != myJoinCol) ++ other.colNames.filter(_ != otherJoinCol)
-    }
+    val newColumnOrder = (colNames.zipWithIndex.map{case (a,b) => (a,b,this)}
+      ++ other.colNames.zipWithIndex.map{case (a,b) => (a,b,other)})
+        .sortBy(_._1)
+    joinDataset.colNames = newColumnOrder.map(_._1)
     joinDataset.colNameSet = joinDataset.colNames.toSet
     joinDataset.erroneous = erroneous || other.erroneous
     joinDataset.containsArrays = containsArrays || other.containsArrays
     joinDataset.containedNestedObjects = containedNestedObjects | other.containedNestedObjects
-    val byKey = other.rows.groupBy(c => getCellValueAsString(c(otherJoinColIndex)))
+    val byKey = other.rows.groupBy(c => LoadedRelationalDataset.getCellValueAsString(c(otherJoinColIndex)))
     rows.foreach(r => {
-      val valueInJoinColumn = getCellValueAsString(r(myJoinColIndex))
+      val valueInJoinColumn = LoadedRelationalDataset.getCellValueAsString(r(myJoinColIndex))
       byKey.getOrElse(valueInJoinColumn,Seq())
         .foreach(matchingRow => {
-          if(variant == JoinConstructionVariant.KeepBoth) {
-            joinDataset.rows += r ++ matchingRow
-          } else if (variant == JoinConstructionVariant.KeepLeft){
-            joinDataset.rows += r ++ matchingRow.slice(0,otherJoinColIndex) ++ matchingRow.slice(otherJoinColIndex+1,matchingRow.size)
-          } else{
-            joinDataset.rows += r.slice(0,myJoinColIndex) ++ r.slice(myJoinColIndex,r.size) ++ matchingRow
-          }
+          joinDataset.rows += constructRow(r,this,matchingRow,other,newColumnOrder)
         })
     })
     joinDataset
@@ -178,7 +196,7 @@ class LoadedRelationalDataset(val id:String, val version:LocalDate, val rows:Arr
     val pr = new PrintWriter(file)
     pr.println(toCSVLineString(colNames))
     rows.foreach( r => {
-      pr.println(toCSVLineString(r.map(getCellValueAsString(_))))
+      pr.println(toCSVLineString(r.map(LoadedRelationalDataset.getCellValueAsString(_))))
     })
     pr.close()
   }
@@ -187,20 +205,11 @@ class LoadedRelationalDataset(val id:String, val version:LocalDate, val rows:Arr
     line.map("\"" + _ + "\"").mkString(",")
   }
 
-  def getCellValueAsString(jsonValue:JsonElement):String = {
-    jsonValue match {
-      case primitive: JsonPrimitive => primitive.getAsString
-      case array: JsonArray =>array.toString
-      case _: JsonNull => LoadedRelationalDataset.NULL_VALUE
-      case _ => throw new AssertionError("Switch case finds unhalndeld option")
-    }
-  }
-
   def getColContentAsString(j: Int) = {
     val values = scala.collection.mutable.ArrayBuffer[String]()
     for (i <- 0 until rows.size) {
       val jsonValue = rows(i)(j)
-      values+= getCellValueAsString(jsonValue)
+      values+= LoadedRelationalDataset.getCellValueAsString(jsonValue)
     }
     values
   }
@@ -217,16 +226,16 @@ class LoadedRelationalDataset(val id:String, val version:LocalDate, val rows:Arr
     }
   }
 
-  def calculateDataDiff(other: LoadedRelationalDataset) = {
+  def calculateDataDiff(successor: LoadedRelationalDataset) = {
     val myTuples = getTupleMultiSet
-    val otherTuples = other.getTupleMultiSet
+    val otherTuples = successor.getTupleMultiSet
     val tupleMatcher = new TupleMatcher()
     val diff = tupleMatcher.matchTuples(myTuples,otherTuples)
     //schema differences:
-    if(other.colNameSet!=colNameSet){
-      if((!other.colNameSet.diff(colNameSet).isEmpty))
-        diff.schemaChange.projection = Some((colNames,other.colNames))
-      val inserts = colNameSet.diff(other.colNameSet).toSeq.sorted
+    if(successor.colNameSet!=colNameSet){
+      if((!successor.colNameSet.diff(colNameSet).isEmpty))
+        diff.schemaChange.projection = Some((colNames,successor.colNames))
+      val inserts = colNameSet.diff(successor.colNameSet).toSeq.sorted
       if(!inserts.isEmpty)
         diff.schemaChange.columnInsert = Some(inserts)
     }
@@ -288,7 +297,8 @@ class LoadedRelationalDataset(val id:String, val version:LocalDate, val rows:Arr
           containsArrays = true
           IndexedSeq((keyPrefix + k,e))
         }
-        case e:JsonPrimitive => IndexedSeq((keyPrefix + k,e))
+        case e:JsonPrimitive =>
+          IndexedSeq((keyPrefix + k,e))
         case e:JsonObject => {
           containedNestedObjects = true
           extractNestedKeyValuePairs(keyPrefix + nestedLevelSeparator + k, firstObj.get(k).getAsJsonObject)
@@ -319,4 +329,13 @@ class LoadedRelationalDataset(val id:String, val version:LocalDate, val rows:Arr
 }
 object LoadedRelationalDataset {
   val NULL_VALUE = ""
+
+  def getCellValueAsString(jsonValue:JsonElement):String = {
+    jsonValue match {
+      case primitive: JsonPrimitive => primitive.getAsString
+      case array: JsonArray =>array.toString
+      case _: JsonNull => LoadedRelationalDataset.NULL_VALUE
+      case _ => throw new AssertionError("Switch case finds unhalndeld option")
+    }
+  }
 }

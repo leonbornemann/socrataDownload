@@ -16,7 +16,7 @@ class LSHEnsembleDomainExporter() extends StrictLogging{
   val diffManager = new DiffManager()
 
   def exportFiles(files: Iterable[File],version:LocalDate,outDir:File) = {
-    logger.debug(s"Beginning domain export for $version")
+    logger.debug(s"Beginning domain export for ${version}_lshensemble_domains.json")
     val writer = new PrintWriter(outDir.getAbsolutePath + s"/${IOService.dateTimeFormatter.format(version)}")
     var count = 0
     files.foreach(f => {

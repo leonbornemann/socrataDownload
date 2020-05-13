@@ -40,6 +40,8 @@ class JoinabilityGraph() extends StrictLogging{
         }
       }
     }
+    logger.debug(s"Found ${toAdd.size} edges to add")
+    logger.debug(s"Found ${edgesToPrune.size} edges to remove")
     // adding missing edges:
     toAdd.foreach{case (srcDs,targetDs,srcCol,targetCol) => {
       val colPairToContainment = adjacencyListGroupedByDS.getOrElseUpdate(srcDs,mutable.HashMap[(Int,LocalDate), mutable.Map[ColEdge, Float]]())
@@ -66,15 +68,23 @@ class JoinabilityGraph() extends StrictLogging{
 
 
   def switchToAdjacencyListGroupedByDSAndCol() = {
+    var a = adjacencyListGroupedByDS.exists{ case (a,b) => {
+      b.exists{case (c,d) => a._2.isAfter(c._2)}
+    }}
+    logger.debug("has Relevant edges")
+    logger.debug(s"$a")
     for (ds1 <- adjacencyListGroupedByDS.keySet) {
       for ((ds2, edges) <- adjacencyListGroupedByDS(ds1)) {
         edges.foreach{ case (ColEdge(c1,c2),f) => {
           val map = adjacencyListGroupedByDSAndCol.getOrElseUpdate(DatasetColumnVertex(ds1._1,ds1._2,c1),mutable.HashMap[DatasetColumnVertex,Float]())
-          map.put(DatasetColumnVertex(ds2._1,ds1._2,c2),f)
+          map.put(DatasetColumnVertex(ds2._1,ds2._2,c2),f)
         }}
       }
     }
     adjacencyListGroupedByDS.clear()
+    a = adjacencyListGroupedByDSAndCol.exists{case (a,b) => b.exists{case (c,d) => a.version.isAfter(c.version)}}
+    logger.debug("has Relevant edges")
+    logger.debug(s"$a")
   }
 
   private def setEdgeValue(srcDS: (Int,LocalDate), targetDS: (Int,LocalDate), scrColID: Short, targetColID: Short, threshold: Float) = {
@@ -128,7 +138,7 @@ case class ColEdge(src:Short, target:Short)
 
 case class DatasetColumnVertex(dsID:Int, version:LocalDate, colID:Short)
 
-object JoinabilityGraph {
+object JoinabilityGraph extends StrictLogging {
 
   def toDate(str: String) = LocalDate.parse(str,IOService.dateTimeFormatter)
 
@@ -136,18 +146,25 @@ object JoinabilityGraph {
     val lineIterator = Source.fromFile(path).getLines()
     val graph = new JoinabilityGraph()
     lineIterator.next()
+    logger.debug("Beginning to read graph")
     while(lineIterator.hasNext){
       val tokens = lineIterator.next().split(",")
-      assert(tokens.size==8)
-      //pr.println("scrDSID,scrColID,targetDSID,targetColID,highestThreshold,highestUniqueness")
-      val (scrDSID,srcVersion,scrColID,targetDSID,targetVersion,targetColID,threshold,maxUniqueness) = (tokens(0).toInt,toDate(tokens(1)),tokens(2).toShort,tokens(3).toInt,toDate(tokens(4)),tokens(5).toShort,tokens(6).toFloat,tokens(7).toFloat)
+      //assert(tokens.size==8)
+      val (scrDSID,srcVersion,scrColID,targetDSID,targetVersion,targetColID) = (tokens(0).toInt,toDate(tokens(1)),tokens(2).toShort,tokens(3).toInt,toDate(tokens(4)),tokens(5).toShort)
+      val (containmentOfSrcInTarget,containmentOfTargetInSrc,maxUniqueness) = (tokens(6).toFloat,tokens(7).toFloat,tokens(8).toFloat)
       if(maxUniqueness >= uniquenessThreshold){
-        assert(!graph.hasEdge((scrDSID,srcVersion),(targetDSID,targetVersion),scrColID,targetColID))
-        graph.setEdgeValue((scrDSID,srcVersion),(targetDSID,targetVersion),scrColID,targetColID,threshold)
+        if(srcVersion.isAfter(targetVersion))
+        if(!graph.hasEdge((scrDSID,srcVersion),(targetDSID,targetVersion),scrColID,targetColID))
+          graph.setEdgeValue((scrDSID,srcVersion),(targetDSID,targetVersion),scrColID,targetColID,containmentOfSrcInTarget)
+        if(!graph.hasEdge((targetDSID,targetVersion),(scrDSID,srcVersion),targetColID,scrColID))
+          graph.setEdgeValue((targetDSID,targetVersion),(scrDSID,srcVersion),targetColID,scrColID,containmentOfTargetInSrc)
       }
     }
+    logger.debug("Read graph from output - beginning consistency check")
     graph.ensureConsistency()
+    logger.debug("Finished consistency check - beginning integrity check")
     graph.assertIntegrity()
+    logger.debug("Finished integrity check")
     graph
   }
 }

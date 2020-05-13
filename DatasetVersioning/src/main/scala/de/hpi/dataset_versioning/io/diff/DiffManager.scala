@@ -9,13 +9,15 @@ import de.hpi.dataset_versioning.io.{IOService, IOUtil}
 
 class DiffManager(daysBetweenCheckpoints:Int=7) extends StrictLogging{
 
-  def replaceAllNonCheckPointsWithDiffs(tmpDirectory:File) = {
+  def replaceAllNonCheckPointsWithDiffs(tmpDirectory:File,calculateDiffForAll:Boolean=true) = {
     val versions = IOService.getSortedDatalakeVersions()
     val actions = (0 until versions.size).map(i => {
       if(!isCheckpoint(i) && IOService.compressedDiffExists(versions(i)))
         (versions(i),"Keep compressed Diff as is")
       else if(!isCheckpoint(i) && !IOService.compressedDiffExists(versions(i)))
         (versions(i),"Replace with compressed Diff")
+      else if(isCheckpoint(i) && calculateDiffForAll && !IOService.compressedDiffExists(versions(i)) && IOService.getSortedDatalakeVersions.head!=versions(i))
+        (versions(i),"Calculate Diff for checkpoint, but keep checkpoint")
       else
         (versions(i),"Keep as Checkpoint")
     })
@@ -29,7 +31,7 @@ class DiffManager(daysBetweenCheckpoints:Int=7) extends StrictLogging{
     if(input.toLowerCase() == "y") {
       for(i <- 1 until versions.size) {
         val version = versions(i)
-        if(!isCheckpoint(i) && !IOService.compressedDiffExists(version)){
+        if((calculateDiffForAll || !isCheckpoint(i)) && !IOService.compressedDiffExists(version) && IOService.getSortedDatalakeVersions.head!=version){
           logger.debug(s"Starting replacement of $version")
           logger.debug(s"Calculating Diff")
           calculateDiff(version)
@@ -39,7 +41,8 @@ class DiffManager(daysBetweenCheckpoints:Int=7) extends StrictLogging{
           val uncompressedDir = IOService.getUncompressedDataDir(version)
           if(IOUtil.dirEquals(tmpDirectory,uncompressedDir)){
             logger.debug(s"Snapshot Restore successful - deleting zipped files")
-            IOService.getCompressedDataFile(version).delete()
+            if(!isCheckpoint(i))
+              IOService.getCompressedDataFile(version).delete()
           } else{
             throw new AssertionError(s"Restored Directory ${tmpDirectory.getAbsolutePath} contents do not match original ($uncompressedDir) - aborting")
           }
@@ -78,7 +81,7 @@ class DiffManager(daysBetweenCheckpoints:Int=7) extends StrictLogging{
     }
   }
 
-  def restoreMinimalSnapshot(version:LocalDate) = {
+  def restoreMinimalSnapshot(version:LocalDate,deleteUncompressedDiffAfter:Boolean = true) = {
     if(IOService.minimalUncompressedVersionDirExists(version)){
       logger.debug(s"skipping minimal snapshot restore of version $version because it already exists")
     } else {
@@ -100,6 +103,10 @@ class DiffManager(daysBetweenCheckpoints:Int=7) extends StrictLogging{
         diffCalculator.patchFile(dstDir, diffFile, srcFile.getName, srcFile.getAbsolutePath)
       })
       logger.debug(s"Finished minimal snapshot restore for version $version")
+    }
+    if(deleteUncompressedDiffAfter){
+      logger.debug(s"Deleting uncompressed Diff for $version")
+      IOService.clearUncompressedDiff(version)
     }
     IOService.getMinimalUncompressedVersionDir(version).listFiles
   }

@@ -9,6 +9,6 @@ object ProjectionFinderMain extends App {
   IOService.socrataDir = args(0)
   val version = LocalDate.parse(args(1),IOService.dateTimeFormatter)
   IOService.cacheMetadata(version)
-  val projectionFinder = new QueryRelationshipDiscoverer(version)
+  val projectionFinder = new QueryRelationshipDiscoverer()
   //TODO: redo: projectionFinder.findProjections(version)
 }

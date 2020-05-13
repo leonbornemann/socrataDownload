@@ -26,8 +26,9 @@ trait JsonReadable[T<:AnyRef] {
     json.extract[T]
   }
 
-  def fromJsonObjectPerLineFile(path:String)(implicit m:Manifest[T]):Iterator[T] = {
+  def fromJsonObjectPerLineFile(path:String)(implicit m:Manifest[T]):Seq[T] = {
     Source.fromFile(path).getLines()
+      .toSeq
       .map(fromJsonString(_))
   }
 }

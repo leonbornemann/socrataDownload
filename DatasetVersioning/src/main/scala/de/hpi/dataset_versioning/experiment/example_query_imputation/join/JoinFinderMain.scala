@@ -7,8 +7,9 @@ import de.hpi.dataset_versioning.io.IOService
 
 object JoinFinderMain extends App {
   IOService.socrataDir = args(0)
-  val version = LocalDate.parse(args(1),IOService.dateTimeFormatter)
-  IOService.cacheMetadata(version)
-  val projectionFinder = new QueryRelationshipDiscoverer(version)
-  //TODO: redo: projectionFinder.findJoins(version)
+  val startVersion = LocalDate.parse(args(1),IOService.dateTimeFormatter)
+  val endVersion = LocalDate.parse(args(2),IOService.dateTimeFormatter)
+  //TODO: doe we still need this?: IOService.cacheMetadata(version)
+  val projectionFinder = new QueryRelationshipDiscoverer()
+  projectionFinder.findProjectJoins(startVersion,endVersion)
 }

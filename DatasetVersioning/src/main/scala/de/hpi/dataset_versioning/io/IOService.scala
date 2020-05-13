@@ -10,6 +10,7 @@ import com.google.gson.JsonParser
 import com.google.gson.stream.JsonReader
 import com.typesafe.scalalogging.StrictLogging
 import de.hpi.dataset_versioning.data.LoadedRelationalDataset
+import de.hpi.dataset_versioning.data.history.DatasetVersionHistory
 import de.hpi.dataset_versioning.data.metadata.DatasetMetadata
 import de.hpi.dataset_versioning.data.metadata.custom.{CustomMetadata, CustomMetadataCollection}
 import de.hpi.dataset_versioning.data.parser.JsonDataParser
@@ -23,6 +24,18 @@ import scala.io.Source
 import scala.reflect.io.Directory
 
 object IOService extends StrictLogging{
+  def readCleanedDatasetLineages() = DatasetVersionHistory.fromJsonObjectPerLineFile(IOService.getCleanedVersionHistoryFile().getAbsolutePath)
+
+  def getOrLoadCustomMetadataForStandardTimeFrame() = {
+    cacheCustomMetadata(STANDARD_TIME_FRAME_START,STANDARD_TIME_FRAME_END)
+    cachedCustomMetadata((STANDARD_TIME_FRAME_START,STANDARD_TIME_FRAME_END))
+  }
+
+
+  def getJoinCandidateFile() = {
+    new File(EXPORT_DIR).mkdirs()
+    new File(EXPORT_DIR + "join_candidates.csv")
+  }
 
   def extractMinimalHistoryInRange(startVersion: LocalDate, endVersion: LocalDate) = {
     var files = mutable.HashSet[(LocalDate,File)]()
@@ -51,6 +64,8 @@ object IOService extends StrictLogging{
 
   var socrataDir:String = null
   val dateTimeFormatter = DateTimeFormatter.ISO_LOCAL_DATE
+  val STANDARD_TIME_FRAME_START = LocalDate.parse("2019-11-01", IOService.dateTimeFormatter)
+  val STANDARD_TIME_FRAME_END = LocalDate.parse("2020-04-30", IOService.dateTimeFormatter)
   val cachedMetadata = mutable.Map[LocalDate,mutable.Map[String,DatasetMetadata]]() //TODO: shrink this cache at some point - use caching library?: https://stackoverflow.com/questions/3651313/how-to-cache-results-in-scala
   val cachedCustomMetadata = mutable.Map[(LocalDate,LocalDate),CustomMetadataCollection]() //TODO: shrink this cache at some point - use caching library?: https://stackoverflow.com/questions/3651313/how-to-cache-results-in-scala
   val datasetCache = mutable.Map[DatasetInstance,LoadedRelationalDataset]()
@@ -64,6 +79,7 @@ object IOService extends StrictLogging{
   def DATA_DIR_UNCOMPRESSED = WORKING_DIR + "/snapshots/"
   def DIFF_DIR_UNCOMPRESSED = WORKING_DIR + "/diffs/"
   def MINIMAL_UNCOMPRESSED_DATA_DIR = WORKING_DIR + "/minimalHistory/"
+  def EXPORT_DIR = socrataDir + "/export_join_candidate/"
 
   def getUncompressedDiffDir(date: LocalDate) = createAndReturn(new File(DIFF_DIR_UNCOMPRESSED + date.format(dateTimeFormatter) + "_diff"))
   def getUncompressedDataDir(date: LocalDate) = createAndReturn(new File(DATA_DIR_UNCOMPRESSED + date.format(dateTimeFormatter)))
@@ -101,8 +117,10 @@ object IOService extends StrictLogging{
   }
 
   def cacheCustomMetadata(startVersion: LocalDate,endVersion:LocalDate) = {
-    val mdColelction = CustomMetadataCollection.fromJsonFile(IOService.getCustomMetadataFile(startVersion,endVersion).getAbsolutePath)
-    cachedCustomMetadata((startVersion,endVersion)) = mdColelction
+    if(!cachedCustomMetadata.contains((startVersion,endVersion))){
+      val mdColelction = CustomMetadataCollection.fromJsonFile(IOService.getCustomMetadataFile(startVersion,endVersion).getAbsolutePath)
+      cachedCustomMetadata((startVersion,endVersion)) = mdColelction
+    }
   }
 
   def clearUncompressedSnapshot(date: LocalDate) = new Directory(getUncompressedDataDir(date)).deleteRecursively() //TODO: existance checks?
@@ -172,8 +190,8 @@ object IOService extends StrictLogging{
     loadDataset(new DatasetInstance(id,version),true)
   }
 
-  def tryLoadAndCacheDataset(id:String,version:LocalDate) = {
-    val ds = loadDataset(new DatasetInstance(id,version),true)
+  def tryLoadAndCacheDataset(id:String,version:LocalDate,minimal:Boolean=false) = {
+    val ds = loadDataset(new DatasetInstance(id,version),true,minimal)
     cacheDataset(ds)
     ds
   }
@@ -196,9 +214,11 @@ object IOService extends StrictLogging{
   //snapshotMetadataFiles:
   def getJoinabilityGraphFile(startVersion:LocalDate,endVersion:LocalDate) = new File(SNAPSHOT_METADATA_DIR + "/smallJoinabilityGraph_" + startVersion.format(dateTimeFormatter) + "_" + endVersion.format(dateTimeFormatter) + ".csv")
   def getInferredProjectionFile(date: LocalDate) = new File(SNAPSHOT_METADATA_DIR + date.format(dateTimeFormatter) + "/inferredProjections.csv")
-  def getInferredJoinFile(date: LocalDate) = new File(SNAPSHOT_METADATA_DIR + date.format(dateTimeFormatter) + "/inferredJoins.csv")
+  def getInferredJoinFile(startVersion: LocalDate,endVersion:LocalDate) = new File(SNAPSHOT_METADATA_DIR + "inferredJoins_" + startVersion.format(dateTimeFormatter) + "_" + endVersion.format(dateTimeFormatter) + ".csv")
   def getCustomMetadataFile(startVersion: LocalDate,endVersion:LocalDate) = new File(SNAPSHOT_METADATA_DIR + "customMetadata_" + startVersion.format(dateTimeFormatter) + "_" + endVersion.format(dateTimeFormatter) + ".json")
   def getVersionHistoryFile() = new File(VERSION_HISTORY_METADATA_DIR + "/datasetVersionHistory.csv")
+  def getCleanedVersionHistoryFile() = new File(VERSION_HISTORY_METADATA_DIR + "/datasetVersionHistory_cleaned.json")
+  def getVersionIgnoreFile() = new File(SNAPSHOT_METADATA_DIR + "/versionIgnore.csv")
   //data and diff files
   def getCompressedDataFile(date: LocalDate): File = new File(DATA_DIR + date.format(dateTimeFormatter) + ".zip")
   def getCompressedDiffFile(date: LocalDate): File = new File(DIFF_DIR + date.format(dateTimeFormatter) + "_diff.zip")
@@ -277,23 +297,25 @@ object IOService extends StrictLogging{
   }
 
   def cacheMetadata(localDate: LocalDate) = {
-    cachedMetadata(localDate) = mutable.HashMap()
-    val metadataDir = new File(METADATA_DIR + localDate.format(dateTimeFormatter) + "/")
-    val metadataFiles = metadataDir.listFiles()
-    var totalSize = 0
-    metadataFiles.foreach(f => {
-      val a = Source.fromFile(f).mkString
-      val reader = new JsonReader(new StringReader(a))
-      val parser = new JsonParser();
-      val curArray = parser.parse(reader).getAsJsonArray
-      totalSize +=curArray.size()
-      assert(curArray.isJsonArray)
-      (0 until curArray.size()).foreach(i => {
-        val datasetMetadata = DatasetMetadata.fromJsonString(curArray.get(i).toString)
-        cachedMetadata(localDate).put(datasetMetadata.resource.id,datasetMetadata)
+    if(!cachedMetadata.contains(localDate)) {
+      cachedMetadata(localDate) = mutable.HashMap()
+      val metadataDir = new File(METADATA_DIR + localDate.format(dateTimeFormatter) + "/")
+      val metadataFiles = metadataDir.listFiles()
+      var totalSize = 0
+      metadataFiles.foreach(f => {
+        val a = Source.fromFile(f).mkString
+        val reader = new JsonReader(new StringReader(a))
+        val parser = new JsonParser();
+        val curArray = parser.parse(reader).getAsJsonArray
+        totalSize += curArray.size()
+        assert(curArray.isJsonArray)
+        (0 until curArray.size()).foreach(i => {
+          val datasetMetadata = DatasetMetadata.fromJsonString(curArray.get(i).toString)
+          cachedMetadata(localDate).put(datasetMetadata.resource.id, datasetMetadata)
+        })
       })
-    })
-    logger.debug(s"Added $localDate to metadata cache")
+      logger.debug(s"Added $localDate to metadata cache")
+    }
   }
 
   def getMetadataForDataset(localDate: LocalDate, datasetID: String): Option[DatasetMetadata] = {

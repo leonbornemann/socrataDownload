@@ -11,11 +11,12 @@ import de.hpi.dataset_versioning.io.IOService
 import scala.io.Source
 
 object JoinAnalysisMain extends App with StrictLogging{
-  IOService.socrataDir = args(0)
-  val version = LocalDate.parse(args(1),IOService.dateTimeFormatter)
+  /*IOService.socrataDir = args(0)
+  val startVersion = LocalDate.parse(args(1),IOService.dateTimeFormatter)
+  val endVersion = LocalDate.parse(args(1),IOService.dateTimeFormatter)
   IOService.cacheMetadata(version)
   val a = IOService.cachedMetadata(version)
-  val f = IOService.getInferredJoinFile(version)
+  val f = IOService.getInferredJoinFile(startVersion,endVersion)
   val it = Source.fromFile(f).getLines()
   it.next()
   val joinSet = it.toSeq
@@ -41,6 +42,6 @@ object JoinAnalysisMain extends App with StrictLogging{
     println()
     println()
     println()
-  })
+  })*/
 
 }

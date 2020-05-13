@@ -18,19 +18,27 @@ class TupleMatcher() extends StrictLogging {
   def matchTuples(leftTuples:  Map[Set[(String, JsonElement)], ArrayBuffer[Set[(String, JsonElement)]]], rightTuples:  Map[Set[(String, JsonElement)], ArrayBuffer[Set[(String, JsonElement)]]]) = {
     var unmatchedLeft = mutable.ArrayBuffer[Set[(String, JsonElement)]]()
     var unmatchedRight = mutable.ArrayBuffer[Set[(String, JsonElement)]]()
-    leftTuples.keySet.union(rightTuples.keySet).foreach( t => {
+    val updates = mutable.HashMap[Set[(String, JsonElement)],Set[(String, JsonElement)]]()
+    val diff = new RelationalDatasetDiff(mutable.HashSet[Set[(String, JsonElement)]](),mutable.HashSet[Set[(String, JsonElement)]](),mutable.HashSet[Set[(String, JsonElement)]](),updates)
+    leftTuples.keySet.union(rightTuples.keySet).foreach(t => {
       val left = leftTuples.getOrElse(t,Seq())
       val right = rightTuples.getOrElse(t,Seq())
       if(left.size==right.size){
-        //perfect match nothing to add to diff - TODO: should we add an artificial row number column?
+        //perfect match nothing to add to diff - TODO: should we add an artificial row number column?#
+        diff.unchanged ++= left
       } else if(left.size > right.size){
-        unmatchedLeft ++= left.slice(0,left.size-right.size)
+        val sizeDifference = left.size-right.size
+        if(sizeDifference != left.size)
+          diff.unchanged ++= left.slice(0,left.size - sizeDifference)
+        unmatchedLeft ++= left.slice(0,sizeDifference)
       } else {
+        val sizeDifference = right.size-left.size
+        if(sizeDifference != right.size)
+          diff.unchanged ++= right.slice(0,right.size - sizeDifference)
         unmatchedRight ++= right.slice(0,right.size-left.size)
       }
+      Unit
     })
-    val updates = mutable.HashMap[Set[(String, JsonElement)],Set[(String, JsonElement)]]()
-    val diff = new RelationalDatasetDiff(mutable.HashSet[Set[(String, JsonElement)]](),mutable.HashSet[Set[(String, JsonElement)]](),updates)
     if (unmatchedLeft.size > sizeThreshold || unmatchedRight.size > sizeThreshold) {
       diff.inserts ++= unmatchedRight
       diff.deletes ++= unmatchedLeft

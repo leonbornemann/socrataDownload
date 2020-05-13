@@ -4,18 +4,19 @@ import java.io.{File, PrintWriter}
 import java.time.LocalDate
 
 import com.typesafe.scalalogging.StrictLogging
-import de.hpi.dataset_versioning.data.metadata.custom.{ColumnDatatype, CustomMetadata}
+import de.hpi.dataset_versioning.data.metadata.custom.{ColumnDatatype, CustomMetadata, CustomMetadataCollection}
 import de.hpi.dataset_versioning.data.metadata.DatasetMetadata
 import de.hpi.dataset_versioning.data.metadata.custom.joinability.{DatasetColumnVertex, JoinabilityGraph, JoinabilityGraphExplorer}
 import de.hpi.dataset_versioning.data.LoadedRelationalDataset
-import de.hpi.dataset_versioning.experiment.example_query_imputation.JoinVariant.JoinVariant
+import de.hpi.dataset_versioning.data.diff.RelationalDatasetDiff
 import de.hpi.dataset_versioning.experiment.example_query_imputation.join.JoinConstructionVariant
 import de.hpi.dataset_versioning.io.IOService
 import de.hpi.dataset_versioning.util.TableFormatter
 
 import scala.collection.mutable
+import scala.io.Source
 
-class QueryRelationshipDiscoverer(version:LocalDate) extends StrictLogging{
+class QueryRelationshipDiscoverer() extends StrictLogging{
 
   val explorer = new JoinabilityGraphExplorer
   var graph:JoinabilityGraph = null
@@ -64,21 +65,38 @@ class QueryRelationshipDiscoverer(version:LocalDate) extends StrictLogging{
     logger.debug("Filter Performance:\n" + toPrint)
   }
 
-  def findJoins(startVersion: LocalDate,endVersion:LocalDate, variant:JoinVariant=JoinVariant.FK_TO_PK) = {
-    IOService.cacheCustomMetadata(startVersion,endVersion)
-    val customMetadata = IOService.cachedCustomMetadata((startVersion,endVersion))
-    logger.trace("Switching graph representation")
-    if(variant == JoinVariant.PK_TO_PK)
-      graph = JoinabilityGraph.readGraphFromGoOutput(IOService.getJoinabilityGraphFile(startVersion,endVersion),1.0f)
-    else
-      graph = JoinabilityGraph.readGraphFromGoOutput(IOService.getJoinabilityGraphFile(startVersion,endVersion))
+  def readJoinCandidates(customMetadata:CustomMetadataCollection) = {
+    Source.fromFile(IOService.getJoinCandidateFile()).getLines()
+      .toIndexedSeq
+      .tail
+      .flatMap( s => {
+        val tokens = s.split(",")
+        val intID = tokens(0).toInt
+        val version = LocalDate.parse(tokens(2), IOService.dateTimeFormatter)
+        customMetadata.metadataByIntID(intID).columnMetadataByID.keySet
+          .map(colID => DatasetColumnVertex(intID,version,colID))
+      } )
+  }
+
+  /***
+   * Current limitations: exactly two joined datasets only
+   *
+   * @param startVersion
+   * @param endVersion
+   * @param variant
+   */
+  def findProjectJoins(startVersion: LocalDate, endVersion:LocalDate) = {
+    val mdStartVersion = LocalDate.parse("2019-11-01",IOService.dateTimeFormatter)
+    val mdEndVersion = LocalDate.parse("2020-04-30",IOService.dateTimeFormatter)
+    IOService.cacheCustomMetadata(mdStartVersion,mdEndVersion)
+    val customMetadata = IOService.cachedCustomMetadata((mdStartVersion,mdEndVersion))
+    logger.trace("Loading graph")
+    graph = JoinabilityGraph.readGraphFromGoOutput(IOService.getJoinabilityGraphFile(startVersion,endVersion))
     graph.switchToAdjacencyListGroupedByDSAndCol()
-    val numEdges = graph.numEdges()
     logger.trace("Done switching graph representation")
-    val hashToDs = customMetadata.metadata.values.groupBy(_.tupleSpecificHash)
     val checkedJoins = mutable.HashSet[(Int,Int,Short,Short)]()
-    val resultWriter = new PrintWriter(IOService.getInferredJoinFile(version))
-    resultWriter.println("joinedDataset,primaryKeyJoinPart,foreignKeyJoinPart")
+    val resultWriter = new PrintWriter(IOService.getInferredJoinFile(startVersion,endVersion))
+    resultWriter.println("joinedDataset,joinedDsVersion,primaryKeyJoinPart,primaryKeyVersion,foreignKeyJoinPart,foreignKeyVersion")
     /*the following code uses these abbreviations:
     j - the candidate dataset for the join result
     fk - the candidate dataset for the relation containing the foreign key
@@ -86,7 +104,7 @@ class QueryRelationshipDiscoverer(version:LocalDate) extends StrictLogging{
     DS - Dataset
     Col - Column
      */
-    var processedEdges = 0
+    var processedJoinCandidates = 0
     var executedJoinQueries = 0
     var discoveredJoins = 0
     val filterAnalysisMap = mutable.HashMap[String,FilterAnalysis]()
@@ -98,76 +116,84 @@ class QueryRelationshipDiscoverer(version:LocalDate) extends StrictLogging{
     filterAnalysisMap.put("PK.pkCol.uniqueness=1.0",FilterAnalysis("PK.pkCol.uniqueness=1.0","Join,Projection,Selection",0,0))
     filterAnalysisMap.put("fkInPkContainment",FilterAnalysis("fkInPkContainment","Join,Projection,Selection",0,0))
     filterAnalysisMap.put("checkedJoin",FilterAnalysis("checkedJoin","Join,Projection,Selection",0,0))
-    filterAnalysisMap.put("J.ncol == Pk.ncol + Fk.ncol - 1",FilterAnalysis("J.ncol == Pk.ncol + Fk.ncol - 1","Join,Selection",0,0))
+    //filterAnalysisMap.put("J.ncol == Pk.ncol + Fk.ncol - 1",FilterAnalysis("J.ncol == Pk.ncol + Fk.ncol - 1","Join,Selection",0,0))
     filterAnalysisMap.put("J to FK and PK full edge containment",FilterAnalysis("J to FK and PK full edge containment","Join,Projection,Selection",0,0))
-    for(jVertex <- graph.adjacencyListGroupedByDSAndCol.keySet) {
-      val (jDS,jVersion,jCol) = (jVertex.dsID,jVertex.version,jVertex.colID)
-      //val jDSStringID = customMetadata.metadataByIntID(jDS).id
-      for ((fkVertex, jInFKContainment) <- graph.adjacencyListGroupedByDSAndCol(jVertex)) {
-        val (fkDS,fkVersion,fkCol) = (fkVertex.dsID,fkVertex.version,fkVertex.colID)
-        val jInFKContainment = graph.getEdgeValue((jDS,jVersion),(fkDS,fkVersion),jCol,fkCol)
-        if(jVersion.isAfter(fkVersion)) { //TODO: we can probably optimize this with smart filtering/indexing in the graph!
-          val fkInJContainment = graph.getEdgeValue((fkDS,fkVersion), (jDS,jVersion), fkCol, jCol)
-          if (jDS != fkDS && jInFKContainment == 1.0 && fkInJContainment == 1.0 && customMetadata.metadataByIntID(jDS).nrows == customMetadata.metadataByIntID(fkDS).nrows) { //todo: REMOVE NROW FILTER if selection is allowed
-            //find primary key candidates:
-            for ((DatasetColumnVertex(pkDS,pkVersion, pkCol), fkInPkContainment) <- graph.adjacencyListGroupedByDSAndCol(fkVertex)) {
-
-              if (jVersion.isAfter(pkVersion) && jDS != pkDS && customMetadata.metadataByIntID(pkDS).columnMetadataByID(pkCol).uniqueness == 1.0) { //todo: RELAX THIS IF WE WANT TO ACCEPT DATA ERRORS
-                val curJoinCandidate = (fkDS, pkDS, fkCol, pkCol)
-                val ncolJ = customMetadata.metadataByIntID(jDS).ncols
-                val ncolPk = customMetadata.metadataByIntID(pkDS).ncols
-                val ncolFk = customMetadata.metadataByIntID(fkDS).ncols
-                if (fkInPkContainment == 1.0 && !checkedJoins.contains(curJoinCandidate) && ncolJ == ncolPk + ncolFk - 1) { //todo: REMOVE schema FILTER IF PROJECTION IS ALLOWED
-                  val jHasEdgesToPKOrFKForAllNonNumericCols = graphContainsAllEdges(graph, customMetadata.metadataByIntID(jDS), jVertex, fkDS, pkDS)
-                  if (jHasEdgesToPKOrFKForAllNonNumericCols) {
-                    checkedJoins.add(curJoinCandidate)
-                    checkedJoins.add((pkDS, fkDS, pkCol, fkCol)) //adding the reverse edge too
-                    val pkDsLoaded = IOService.tryLoadAndCacheDataset(customMetadata.metadataByIntID(pkDS).id, version)
-                    val fkDsLoaded = IOService.tryLoadAndCacheDataset(customMetadata.metadataByIntID(fkDS).id, version)
-                    //val joinedDSKeepBoth = pkDsLoaded.join(fkDsLoaded, numericIdToCol((pkDS, pkCol)), numericIdToCol((fkDS, fkCol)), JoinConstructionVariant.KeepBoth)
-                    val joinedDSKeepLeft = pkDsLoaded.join(fkDsLoaded, pkCol, fkCol, JoinConstructionVariant.KeepLeft)
-                    //val joinedDSKeepRight = pkDsLoaded.join(fkDsLoaded, numericIdToCol((pkDS, pkCol)), numericIdToCol((fkDS, fkCol)), JoinConstructionVariant.KeepRight)
-                    //discoveredJoins += findAndCheckJoinMatches(version, hashToDs, resultWriter, fkDSStringID, pkDSStringID, joinedDSKeepBoth)
-                    val fkDSStringID = customMetadata.metadataByIntID(fkDS).id
-                    val pkDSStringID = customMetadata.metadataByIntID(pkDS).id
-                    discoveredJoins += findAndCheckJoinMatches(version, hashToDs, resultWriter, fkDSStringID, pkDSStringID, joinedDSKeepLeft)
-                    //discoveredJoins += findAndCheckJoinMatches(version, hashToDs, resultWriter, fkDSStringID, pkDSStringID, joinedDSKeepRight)
-                    executedJoinQueries += 1
-                    logProgress("Join Queries", executedJoinQueries, 1000)
+    val sortedDSVersions = customMetadata.getSortedVersions
+    val a = graph.adjacencyListGroupedByDSAndCol.exists{case (a,b) => b.exists{case (c,d) => a.version.isAfter(c.version)}}
+    val joinCandidates = readJoinCandidates(customMetadata)
+    for(jVertex <- joinCandidates){
+      if(graph.adjacencyListGroupedByDSAndCol.contains(jVertex)){
+        val (jDS,jVersion,jCol) = (jVertex.dsID,jVertex.version,jVertex.colID)
+        //val jDSStringID = customMetadata.metadataByIntID(jDS).id
+        for ((fkVertex, jInFKContainment) <- graph.adjacencyListGroupedByDSAndCol(jVertex)) {
+          val (fkDS,fkVersion,fkCol) = (fkVertex.dsID,fkVertex.version,fkVertex.colID)
+          val jInFKContainment = graph.getEdgeValue((jDS,jVersion),(fkDS,fkVersion),jCol,fkCol)
+          if(jVersion.isAfter(fkVersion)) { //TODO: we can probably optimize this with smart filtering/indexing in the graph!
+            val fkInJContainment = graph.getEdgeValue((fkDS,fkVersion), (jDS,jVersion), fkCol, jCol)
+            if (jDS != fkDS && jInFKContainment == 1.0 && fkInJContainment == 1.0 && customMetadata.metadataByIntID(jDS).nrows == customMetadata.metadataByIntID(fkDS).nrows) { //todo: REMOVE NROW FILTER if selection is allowed
+              //find primary key candidates:
+              for ((DatasetColumnVertex(pkDS,pkVersion, pkCol), fkInPkContainment) <- graph.adjacencyListGroupedByDSAndCol(fkVertex)) {
+                val jStrID = customMetadata.metadataByIntID(jDS).id
+                val pkStrID = customMetadata.metadataByIntID(pkDS).id
+                val fkStrID = customMetadata.metadataByIntID(fkDS).id
+                if((sortedDSVersions(jStrID).head.intID != jDS || fkStrID == jStrID || pkStrID == jStrID ) && pkStrID!=fkStrID){
+                  if (jVersion.isAfter(pkVersion) && jDS != pkDS && customMetadata.metadataByIntID(pkDS).columnMetadataByID(pkCol).uniqueness == 1.0) { //todo: RELAX THIS IF WE WANT TO ACCEPT DATA ERRORS
+                    val curJoinCandidate = (fkDS, pkDS, fkCol, pkCol)
+                    val ncolJ = customMetadata.metadataByIntID(jDS).ncols
+                    val ncolPk = customMetadata.metadataByIntID(pkDS).ncols
+                    val ncolFk = customMetadata.metadataByIntID(fkDS).ncols
+                    if (fkInPkContainment == 1.0 && !checkedJoins.contains(curJoinCandidate)) {
+                      val jHasEdgesToPKOrFKForAllNonNumericCols = graphContainsAllEdges(graph, customMetadata.metadataByIntID(jDS), jVertex, fkDS, pkDS)
+                      if (jHasEdgesToPKOrFKForAllNonNumericCols) {
+                        //checkedJoins.add(curJoinCandidate)
+                        //checkedJoins.add((pkDS, fkDS, pkCol, fkCol)) //adding the reverse edge too
+                        val pkDsLoaded = IOService.tryLoadAndCacheDataset(pkStrID, pkVersion,true)
+                        val fkDsLoaded = IOService.tryLoadAndCacheDataset(fkStrID, fkVersion,true)
+                        val jDSLoaded = IOService.tryLoadAndCacheDataset(customMetadata.metadataByIntID(jDS).id, jVersion,true)
+                        //val joinedDSKeepBoth = pkDsLoaded.join(fkDsLoaded, numericIdToCol((pkDS, pkCol)), numericIdToCol((fkDS, fkCol)), JoinConstructionVariant.KeepBoth)
+                        val joinedDSKeepBoth = pkDsLoaded.join(fkDsLoaded, pkCol, fkCol, JoinConstructionVariant.KeepBoth)
+                        //val joinedDSKeepRight = pkDsLoaded.join(fkDsLoaded, numericIdToCol((pkDS, pkCol)), numericIdToCol((fkDS, fkCol)), JoinConstructionVariant.KeepRight)
+                        //discoveredJoins += findAndCheckJoinMatches(version, hashToDs, resultWriter, fkDSStringID, pkDSStringID, joinedDSKeepBoth)
+                        val fkDSStringID = fkStrID
+                        val pkDSStringID = pkStrID
+                        discoveredJoins += checkProjectJoinMatch(jDSLoaded,joinedDSKeepBoth,jVersion,fkVersion,pkVersion,fkDSStringID,pkDSStringID,resultWriter)
+                        //discoveredJoins += findAndCheckJoinMatches(version, hashToDs, resultWriter, fkDSStringID, pkDSStringID, joinedDSKeepBoth)
+                        //discoveredJoins += findAndCheckJoinMatches(version, hashToDs, resultWriter, fkDSStringID, pkDSStringID, joinedDSKeepRight)
+                        executedJoinQueries += 1
+                        logProgress("Join Queries", executedJoinQueries, 1000)
+                      }
+                      addToFilterAnalysis(filterAnalysisMap, "J to FK and PK full edge containment", jHasEdgesToPKOrFKForAllNonNumericCols)
+                    }
+                    //----------------Filter Analysis:
+                    addToFilterAnalysis(filterAnalysisMap, "fkInPkContainment", fkInPkContainment == 1.0)
+                    if (fkInPkContainment == 1.0)
+                      addToFilterAnalysis(filterAnalysisMap, "checkedJoin", !checkedJoins.contains(curJoinCandidate))
+                    //-----------------------------------------
                   }
-                  addToFilterAnalysis(filterAnalysisMap, "J to FK and PK full edge containment", jHasEdgesToPKOrFKForAllNonNumericCols)
+                  //----------------Filter Analysis:
+                  addToFilterAnalysis(filterAnalysisMap,"jAfterPK",jVersion.isAfter(pkVersion))
+                  if (jVersion.isAfter(pkVersion) && jDS != pkDS)
+                    addToFilterAnalysis(filterAnalysisMap, "PK.pkCol.uniqueness=1.0", customMetadata.metadataByIntID(pkDS).columnMetadataByID(pkCol).uniqueness == 1.0)
+                  //-----------------------------------------------
                 }
-                //----------------Filter Analysis:
-                addToFilterAnalysis(filterAnalysisMap, "fkInPkContainment", fkInPkContainment == 1.0)
-                if (fkInPkContainment == 1.0)
-                  addToFilterAnalysis(filterAnalysisMap, "checkedJoin", !checkedJoins.contains(curJoinCandidate))
-                if (fkInPkContainment == 1.0 && !checkedJoins.contains(curJoinCandidate))
-                  addToFilterAnalysis(filterAnalysisMap, "J.ncol == Pk.ncol + Fk.ncol - 1", ncolJ == ncolPk + ncolFk - 1)
-
-                //-----------------------------------------
               }
-              //----------------Filter Analysis:
-              addToFilterAnalysis(filterAnalysisMap,"JAfterFK",jVersion.isAfter(pkVersion))
-              if (jVersion.isAfter(pkVersion) && jDS != pkDS)
-                addToFilterAnalysis(filterAnalysisMap, "PK.pkCol.uniqueness=1.0", customMetadata.metadataByIntID(pkDS).columnMetadataByID(pkCol).uniqueness == 1.0)
-              //-----------------------------------------------
             }
+            addToFilterAnalysis(filterAnalysisMap,"jInFkContainment",jInFKContainment == 1.0)
+            if(jInFKContainment == 1.0)
+              addToFilterAnalysis(filterAnalysisMap,"fkInJContainment",fkInJContainment == 1.0)
+            if(jInFKContainment == 1.0 && fkInJContainment == 1.0)
+              addToFilterAnalysis(filterAnalysisMap,"J.nrow=FK.nrow",customMetadata.metadataByIntID(jDS).nrows == customMetadata.metadataByIntID(fkDS).nrows)
           }
-          addToFilterAnalysis(filterAnalysisMap,"jInFkContainment",jInFKContainment == 1.0)
-          if(jInFKContainment == 1.0)
-            addToFilterAnalysis(filterAnalysisMap,"fkInJContainment",fkInJContainment == 1.0)
-          if(jInFKContainment == 1.0 && fkInJContainment == 1.0)
-            addToFilterAnalysis(filterAnalysisMap,"J.nrow=FK.nrow",customMetadata.metadataByIntID(jDS).nrows == customMetadata.metadataByIntID(fkDS).nrows)
+          //----------------Filter Analysis:
+          addToFilterAnalysis(filterAnalysisMap,"jAfterFK",jVersion.isAfter(fkVersion))
         }
-        //----------------Filter Analysis:
-        addToFilterAnalysis(filterAnalysisMap,"JAfterFK",jVersion.isAfter(fkVersion))
-        //------------------------------------------------
-        processedEdges += 1
-        logProgress("Joinability Graph Edges", processedEdges, 10000,Some(numEdges))
-        if (processedEdges % 10000 == 0) {
-          printFilterPerformance(filterAnalysisMap)
-          logger.debug(s"Found $discoveredJoins true join relationships")
-        }
+      }
+      //------------------------------------------------
+      processedJoinCandidates += 1
+      logProgress("Join Candidate Vertices", processedJoinCandidates, 1000,Some(joinCandidates.size))
+      if (processedJoinCandidates % 1000 == 0) {
+        printFilterPerformance(filterAnalysisMap)
+        logger.debug(s"Found $discoveredJoins true join relationships")
       }
     }
     logger.debug("finished program")
@@ -175,7 +201,19 @@ class QueryRelationshipDiscoverer(version:LocalDate) extends StrictLogging{
     resultWriter.close()
   }
 
-  private def findAndCheckJoinMatches(version: LocalDate, hashToDs: Map[Int, Iterable[CustomMetadata]], resultWriter: PrintWriter, fkDSStringID: String, pkDSStringID: String, joinedDSKeepBoth: LoadedRelationalDataset) = {
+  private def checkProjectJoinMatch(candidateDs: LoadedRelationalDataset, joinResult: LoadedRelationalDataset,jVersion:LocalDate,fkVersion:LocalDate,pkVersion:LocalDate,pkDSStringID:String,fkDSStringID:String, resultWriter: PrintWriter) = {
+    val mapping = RelationalDatasetDiff.getColumnMapping(candidateDs, joinResult, None)
+    if (mapping.isDefined && candidateDs.isProjectionOf(joinResult, mapping.get)) {
+      resultWriter.println(s"${candidateDs.id},$jVersion,$pkDSStringID,$pkVersion,$fkDSStringID,$fkVersion")
+      resultWriter.flush()
+      1
+    } else
+      0
+
+
+  }
+
+  /*private def findAndCheckJoinMatches(version: LocalDate, hashToDs: Map[Int, Iterable[CustomMetadata]], resultWriter: PrintWriter, fkDSStringID: String, pkDSStringID: String, joinedDSKeepBoth: LoadedRelationalDataset) = {
     val joinedHash = joinedDSKeepBoth.getTupleSpecificHash
     //find all candidates that have matching tuple specific hash values:
     var foundMatches = 0
@@ -192,7 +230,7 @@ class QueryRelationshipDiscoverer(version:LocalDate) extends StrictLogging{
       }
     }
     foundMatches
-  }
+  }*/
 
 
   /***
@@ -216,71 +254,6 @@ class QueryRelationshipDiscoverer(version:LocalDate) extends StrictLogging{
     }
   }
 
-  def getColumnMapping(from: LoadedRelationalDataset, to: LoadedRelationalDataset, edges: Option[Set[(String, String)]]) = {
-    var abort = false
-    val columnMapping = mutable.HashMap[String,String]()
-    val takenColumns = scala.collection.mutable.HashSet[String]()
-    if(from.columnMetadata.isEmpty) from.calculateColumnMetadata()
-    if(to.columnMetadata.isEmpty) to.calculateColumnMetadata()
-    //if we have edges from the joinability graph we can use those:
-    if(edges.isDefined){
-      val map = edges.get.groupBy(_._1)
-        .toSeq
-        .sortBy(_._2.size)
-      val a = map.iterator
-      while(a.hasNext && !abort){
-        var (srcCol,edges) = a.next()
-        val candidateMatches = edges.map(_._2)
-          .filter(!takenColumns.contains(_))
-        if(candidateMatches.size==0)
-          abort = true
-        else if(edges.size==1){
-          takenColumns += candidateMatches.head
-          columnMapping(srcCol) = candidateMatches.head
-        } else{
-          takenColumns += candidateMatches.head
-          columnMapping(srcCol) = candidateMatches.head
-          logger.debug("encountered difficult column matching case")
-        }
-      }
-    }
-    if(abort){
-      None
-    } else{
-      //try to match the rest of the columns:
-      val freeInProjected = from.colNames.toSet.diff(columnMapping.keySet)
-        .map(s => (s,from.columnMetadata(s).hash))
-        .toMap
-      if(freeInProjected.isEmpty)
-        Some(columnMapping)
-      else{
-        val freeInOriginal = to.colNames.toSet.diff(columnMapping.values.toSet) //TODO: make the map the other way around here! - saves code later
-          .map(s => (s,to.columnMetadata(s).hash))
-          .toMap
-        //invert the maps:
-        val projectedHashToColname = freeInProjected.groupBy(_._2).mapValues(_.keys)
-        val originalHashToColname = freeInOriginal.groupBy(_._2).mapValues(_.keys)
-        val it = projectedHashToColname.iterator
-        while(it.hasNext && !abort){
-          val (projectedHash,colNamesProjected) = it.next()
-          if(!originalHashToColname.contains(projectedHash)){
-            abort = true
-          } else {
-            val matchingColNames = originalHashToColname(projectedHash).toSeq
-              .filter(!takenColumns.contains(_))
-            if (colNamesProjected.size == matchingColNames.size) {
-              columnMapping ++= colNamesProjected.zip(matchingColNames)
-              takenColumns ++= matchingColNames
-            } else {
-              abort = true
-            }
-          }
-        }
-        if(abort) None
-        else Some(columnMapping)
-      }
-    }
-  }
 /*
   def findProjections(version: LocalDate) = {
     graph = JoinabilityGraph.readGraphFromGoOutput(IOService.getJoinabilityGraphFile(version))

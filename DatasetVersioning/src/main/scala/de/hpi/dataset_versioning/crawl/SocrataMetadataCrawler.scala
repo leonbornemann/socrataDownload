@@ -80,7 +80,6 @@ class SocrataMetadataCrawler(metadataResultDir:String) extends StrictLogging{
     ids.zipWithIndex.foreach(println)
     ids2.zipWithIndex.foreach(println)
     assert(secondHalfFirstPart == firstHalfSecondPart)
-
   }
 
   private def getResultsFromURL(url1: String) = {

@@ -1,6 +1,6 @@
-package de.hpi.dataset_versioning.io
+package de.hpi.dataset_versioning.data
 
-import de.hpi.dataset_versioning.io.diff.SnapshotToDiffMain.args
+import de.hpi.dataset_versioning.io.IOService
 
 object StatusReportMain extends App {
   IOService.socrataDir = args(0)

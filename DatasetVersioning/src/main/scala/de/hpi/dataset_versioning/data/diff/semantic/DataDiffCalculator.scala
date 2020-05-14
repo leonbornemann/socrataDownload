@@ -1,10 +1,9 @@
-package de.hpi.dataset_versioning.data.diff
+package de.hpi.dataset_versioning.data.diff.semantic
 
 import java.time.LocalDate
 
 import com.typesafe.scalalogging.StrictLogging
 import de.hpi.dataset_versioning.io.IOService
-import de.hpi.dataset_versioning.matching.MatchingRunner
 
 class DataDiffCalculator() extends StrictLogging{
 
@@ -28,7 +27,7 @@ class DataDiffCalculator() extends StrictLogging{
 
 
   def calculateDataDiff(previous: LocalDate, current: LocalDate) = {
-    val matching = new MatchingRunner().getGroundTruthMatching(previous,current)
+    val matching = GroundTruthDatasetMatching.getGroundTruthMatching(previous,current)
     val datalakeDiffSummary = new DatalakeDiffSummary()
     matching.matchings.foreach{ case (prev,cur) => {
       try {

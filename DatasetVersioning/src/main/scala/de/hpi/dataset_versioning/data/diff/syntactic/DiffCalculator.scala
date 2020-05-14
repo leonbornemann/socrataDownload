@@ -1,17 +1,12 @@
-package de.hpi.dataset_versioning.io.diff
+package de.hpi.dataset_versioning.data.diff.syntactic
 
-import java.io.{File, FileInputStream, FileOutputStream, PrintWriter}
+import java.io.{File, PrintWriter}
 import java.time.LocalDate
-import java.time.temporal.ChronoUnit
-import java.util.zip.{ZipEntry, ZipInputStream}
 
 import com.typesafe.scalalogging.StrictLogging
-import de.hpi.dataset_versioning.io
 import de.hpi.dataset_versioning.io.IOService
-import org.joda.time.Days
 
 import scala.io.Source
-import scala.reflect.io.Directory
 import scala.sys.process._
 
 class DiffCalculator() extends StrictLogging{

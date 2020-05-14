@@ -3,10 +3,11 @@ package de.hpi.dataset_versioning.data.exploration
 import java.io.File
 import java.time.LocalDate
 
+import de.hpi.dataset_versioning.data
+import de.hpi.dataset_versioning.data.DatasetInstance
 import de.hpi.dataset_versioning.data.exploration.SingleHTMLExportMain.args
 import de.hpi.dataset_versioning.data.history.DatasetVersionHistory
 import de.hpi.dataset_versioning.io.IOService
-import de.hpi.dataset_versioning.matching.DatasetInstance
 
 import scala.util.Random
 
@@ -29,8 +30,8 @@ object RandomDiffToHTMLExport extends App {
       val lineage = lineages(rand.nextInt(lineages.size))
       val (secondVersion,i) = lineage.versionsWithChanges.zipWithIndex.tail(rand.nextInt(lineage.versionsWithChanges.size-1))
       val firstVersion = lineage.versionsWithChanges(i-1)
-      val dsBeforeChange = IOService.tryLoadDataset(DatasetInstance(lineage.id,firstVersion),true)
-      val dsAfterChange = IOService.tryLoadDataset(DatasetInstance(lineage.id,secondVersion),true)
+      val dsBeforeChange = IOService.tryLoadDataset(data.DatasetInstance(lineage.id,firstVersion),true)
+      val dsAfterChange = IOService.tryLoadDataset(data.DatasetInstance(lineage.id,secondVersion),true)
       val diff = dsBeforeChange.calculateDataDiff(dsAfterChange)
       val exporter = new DatasetHTMLExporter()
       exporter.exportDiffTableView(dsBeforeChange,dsAfterChange,diff,new File(s"$targetDir/${dsBeforeChange.id}_${dsBeforeChange.version}-->${dsAfterChange.version}.html"))

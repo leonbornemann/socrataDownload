@@ -4,7 +4,7 @@ import java.io.{File, PrintWriter}
 
 import com.google.gson.JsonElement
 import de.hpi.dataset_versioning.data.LoadedRelationalDataset
-import de.hpi.dataset_versioning.data.diff.RelationalDatasetDiff
+import de.hpi.dataset_versioning.data.diff.semantic.RelationalDatasetDiff
 import de.hpi.dataset_versioning.io.IOService
 
 import scala.collection.mutable

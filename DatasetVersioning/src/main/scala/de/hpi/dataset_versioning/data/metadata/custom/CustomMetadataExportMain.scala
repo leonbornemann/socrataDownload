@@ -3,8 +3,9 @@ package de.hpi.dataset_versioning.data.metadata.custom
 import java.time.LocalDate
 
 import com.typesafe.scalalogging.StrictLogging
+import de.hpi.dataset_versioning.data
+import de.hpi.dataset_versioning.data.DatasetInstance
 import de.hpi.dataset_versioning.io.IOService
-import de.hpi.dataset_versioning.matching.DatasetInstance
 
 import scala.collection.mutable.HashMap
 
@@ -35,7 +36,7 @@ object CustomMetadataExportMain extends App with StrictLogging{
       val ds = IOService.tryLoadDataset(new DatasetInstance(IOService.filenameToID(f),v),true)
       if(!ds.isEmpty){
         val md = ds.extractCustomMetadata(intID)
-        metadataCollection.put(DatasetInstance(IOService.filenameToID(f),v),md)
+        metadataCollection.put(data.DatasetInstance(IOService.filenameToID(f),v),md)
       }
       intID +=1
       if(intID%1000 == 0)

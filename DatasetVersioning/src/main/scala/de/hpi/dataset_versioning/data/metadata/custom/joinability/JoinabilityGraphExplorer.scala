@@ -4,8 +4,9 @@ import java.io.{File, PrintWriter}
 import java.time.LocalDate
 
 import com.typesafe.scalalogging.StrictLogging
+import de.hpi.dataset_versioning.data
+import de.hpi.dataset_versioning.data.DatasetInstance
 import de.hpi.dataset_versioning.io.IOService
-import de.hpi.dataset_versioning.matching.DatasetInstance
 
 import scala.io.Source
 
@@ -29,9 +30,9 @@ class JoinabilityGraphExplorer() extends StrictLogging {
       assert(tokens.size==8)
       val (sourceTable,sourceDate,sourceAttr,targetTable,targetDate,targetAttr) = (tokens(0),LocalDate.parse(tokens(1),IOService.dateTimeFormatter),tokens(2),tokens(3),LocalDate.parse(tokens(4),IOService.dateTimeFormatter),tokens(5))
       val (containmentOfSrcInTarget,containmentOfTargetInSrc) = (tokens(6).toDouble,tokens(7).toDouble)
-      if(mdCollection.contains(DatasetInstance(sourceTable,sourceDate)) && mdCollection.contains(DatasetInstance(targetTable,targetDate))) {
-        val srcMetadata = mdCollection(DatasetInstance(sourceTable,sourceDate))
-        val targetMetadata = mdCollection(DatasetInstance(targetTable,targetDate))
+      if(mdCollection.contains(data.DatasetInstance(sourceTable,sourceDate)) && mdCollection.contains(data.DatasetInstance(targetTable,targetDate))) {
+        val srcMetadata = mdCollection(data.DatasetInstance(sourceTable,sourceDate))
+        val targetMetadata = mdCollection(data.DatasetInstance(targetTable,targetDate))
         val (srcID, targetID) = (srcMetadata.intID, targetMetadata.intID)
         if (srcMetadata.columnMetadata.contains(sourceAttr) && targetMetadata.columnMetadata.contains(targetAttr)) {
           val srcColMetadata = srcMetadata.columnMetadata(sourceAttr)

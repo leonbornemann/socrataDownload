@@ -4,10 +4,10 @@ import java.io.{File, PrintWriter}
 import java.time.LocalDate
 
 import com.typesafe.scalalogging.StrictLogging
+import de.hpi.dataset_versioning.data
 import de.hpi.dataset_versioning.data.parser.JsonDataParser
-import de.hpi.dataset_versioning.data.{JsonReadable, JsonWritable}
+import de.hpi.dataset_versioning.data.{DatasetInstance, JsonReadable, JsonWritable}
 import de.hpi.dataset_versioning.io.IOService
-import de.hpi.dataset_versioning.matching.DatasetInstance
 
 import scala.collection.mutable
 import scala.io.Source
@@ -62,7 +62,7 @@ object DatasetVersionHistory extends JsonReadable[DatasetVersionHistory] with St
       val versionsToIgnore = mutable.HashSet[LocalDate]()
       for (i <- 0 until lineage.versionsWithChanges.size) {
         val curVersion = lineage.versionsWithChanges(i)
-        val dsInstance = DatasetInstance(lineage.id, curVersion)
+        val dsInstance = data.DatasetInstance(lineage.id, curVersion)
         if(!md.metadata.contains(dsInstance)){
           //try parsing the dataset
           val ds = IOService.tryLoadDataset(dsInstance,true)
@@ -95,15 +95,15 @@ object DatasetVersionHistory extends JsonReadable[DatasetVersionHistory] with St
       for (i <- 1 until lineage.versionsWithChanges.size) {
         val prevVersion = lineage.versionsWithChanges(i-1)
         val curIgnoreCandidateVersion = lineage.versionsWithChanges(i)
-        if(!md.metadata.contains(DatasetInstance(lineage.id,prevVersion))){
+        if(!md.metadata.contains(data.DatasetInstance(lineage.id,prevVersion))){
           println(lineage.id)
         } else {
-          val prevMD = md.metadata(DatasetInstance(lineage.id, prevVersion))
-          if(md.metadata.contains(DatasetInstance(lineage.id, curIgnoreCandidateVersion))){
-            val curMD = md.metadata(DatasetInstance(lineage.id, curIgnoreCandidateVersion))
+          val prevMD = md.metadata(data.DatasetInstance(lineage.id, prevVersion))
+          if(md.metadata.contains(data.DatasetInstance(lineage.id, curIgnoreCandidateVersion))){
+            val curMD = md.metadata(data.DatasetInstance(lineage.id, curIgnoreCandidateVersion))
             if (prevMD.tupleSpecificHash == curMD.tupleSpecificHash) {
               val toIgnore = versionsToIgnore.getOrElseUpdate(lineage.id, mutable.HashSet[DatasetInstance]())
-              toIgnore.add(DatasetInstance(lineage.id, curIgnoreCandidateVersion))
+              toIgnore.add(data.DatasetInstance(lineage.id, curIgnoreCandidateVersion))
             }
           }
         }
@@ -132,7 +132,7 @@ object DatasetVersionHistory extends JsonReadable[DatasetVersionHistory] with St
       .toSet
       .map((s:String) => {
         val tokens = s.split(",")
-        DatasetInstance(tokens(0),LocalDate.parse(tokens(1),IOService.dateTimeFormatter))
+        data.DatasetInstance(tokens(0),LocalDate.parse(tokens(1),IOService.dateTimeFormatter))
       })
       .groupBy(_.id)
     histories.foreach(h => {

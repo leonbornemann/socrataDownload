@@ -5,9 +5,9 @@ import java.nio.file.{CopyOption, Path}
 import java.time.LocalDate
 
 import com.typesafe.scalalogging.StrictLogging
+import de.hpi.dataset_versioning.data.DatasetInstance
+import de.hpi.dataset_versioning.data.diff.syntactic.DiffManager
 import de.hpi.dataset_versioning.io.IOService
-import de.hpi.dataset_versioning.io.diff.{DiffCalculator, DiffManager}
-import de.hpi.dataset_versioning.matching.DatasetInstance
 
 import scala.collection.mutable.ArrayBuffer
 

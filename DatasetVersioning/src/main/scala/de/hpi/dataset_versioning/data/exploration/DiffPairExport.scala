@@ -4,9 +4,10 @@ import java.io.File
 import java.time.LocalDate
 
 import com.typesafe.scalalogging.StrictLogging
+import de.hpi.dataset_versioning.data
+import de.hpi.dataset_versioning.data.DatasetInstance
 import de.hpi.dataset_versioning.data.exploration.RandomDiffToHTMLExport.args
 import de.hpi.dataset_versioning.io.IOService
-import de.hpi.dataset_versioning.matching.DatasetInstance
 
 import scala.io.Source
 import scala.util.Random
@@ -43,11 +44,11 @@ object DiffPairExport extends App with StrictLogging{
         val curDiffTimestamp = sharedChangeTimestamps(i)
         val prevVersionA = lA.versionsWithChanges.takeWhile(_.isBefore(curDiffTimestamp)).last
         val prevVersionB = lB.versionsWithChanges.takeWhile(_.isBefore(curDiffTimestamp)).last
-        val dsABeforeChange = IOService.tryLoadDataset(DatasetInstance(lA.id, prevVersionA), true)
-        val dsAAfterChange = IOService.tryLoadDataset(DatasetInstance(lA.id, curDiffTimestamp), true)
+        val dsABeforeChange = IOService.tryLoadDataset(data.DatasetInstance(lA.id, prevVersionA), true)
+        val dsAAfterChange = IOService.tryLoadDataset(data.DatasetInstance(lA.id, curDiffTimestamp), true)
         val diffA = dsABeforeChange.calculateDataDiff(dsAAfterChange)
-        val dsBBeforeChange = IOService.tryLoadDataset(DatasetInstance(lB.id, prevVersionB), true)
-        val dsBAfterChange = IOService.tryLoadDataset(DatasetInstance(lB.id, curDiffTimestamp), true)
+        val dsBBeforeChange = IOService.tryLoadDataset(data.DatasetInstance(lB.id, prevVersionB), true)
+        val dsBAfterChange = IOService.tryLoadDataset(data.DatasetInstance(lB.id, curDiffTimestamp), true)
         val diffB = dsBBeforeChange.calculateDataDiff(dsBAfterChange)
         if(Seq(dsAAfterChange,dsABeforeChange,dsBAfterChange,dsBBeforeChange).exists(_.erroneous)){
           logger.debug(s"Skipping version $curDiffTimestamp, because one dataset was erroneous")

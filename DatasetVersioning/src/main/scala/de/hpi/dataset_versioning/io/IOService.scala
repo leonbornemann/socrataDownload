@@ -9,13 +9,12 @@ import java.util.zip.{ZipEntry, ZipInputStream}
 import com.google.gson.JsonParser
 import com.google.gson.stream.JsonReader
 import com.typesafe.scalalogging.StrictLogging
-import de.hpi.dataset_versioning.data.LoadedRelationalDataset
+import de.hpi.dataset_versioning.data.{DatasetInstance, LoadedRelationalDataset}
+import de.hpi.dataset_versioning.data.diff.syntactic.DiffManager
 import de.hpi.dataset_versioning.data.history.DatasetVersionHistory
 import de.hpi.dataset_versioning.data.metadata.DatasetMetadata
 import de.hpi.dataset_versioning.data.metadata.custom.{CustomMetadata, CustomMetadataCollection}
 import de.hpi.dataset_versioning.data.parser.JsonDataParser
-import de.hpi.dataset_versioning.io.diff.DiffManager
-import de.hpi.dataset_versioning.matching.DatasetInstance
 import org.joda.time.Days
 
 import scala.sys.process._

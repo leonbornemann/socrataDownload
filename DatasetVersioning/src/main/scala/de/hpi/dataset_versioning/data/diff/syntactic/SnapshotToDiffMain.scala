@@ -1,12 +1,13 @@
-package de.hpi.dataset_versioning.io.diff
+package de.hpi.dataset_versioning.data.diff.syntactic
 
 import java.io.File
 
 import de.hpi.dataset_versioning.io.IOService
 
-object DiffCreationMain extends App {
+object SnapshotToDiffMain extends App {
   IOService.socrataDir = args(0)
   IOService.printSummary()
   val transformer = new DiffManager(7)
-  transformer.calculateAllDiffs()
+  transformer.replaceAllNonCheckPointsWithDiffs(new File(args(1)))
+
 }

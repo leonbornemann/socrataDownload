@@ -1,4 +1,4 @@
-package de.hpi.dataset_versioning.io.diff
+package de.hpi.dataset_versioning.data.diff.syntactic
 
 import java.time.LocalDate
 

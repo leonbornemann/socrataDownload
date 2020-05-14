@@ -1,9 +1,7 @@
-package de.hpi.dataset_versioning.matching
+package de.hpi.dataset_versioning.data
 
-import java.io.File
 import java.time.LocalDate
 
-import de.hpi.dataset_versioning.data.JsonWritable
 import de.hpi.dataset_versioning.data.metadata.DatasetMetadata
 import de.hpi.dataset_versioning.io.IOService
 

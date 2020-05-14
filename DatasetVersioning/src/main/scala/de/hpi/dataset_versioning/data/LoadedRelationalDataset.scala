@@ -5,12 +5,10 @@ import java.time.LocalDate
 
 import com.google.gson._
 import com.typesafe.scalalogging.StrictLogging
-import de.hpi.dataset_versioning.experiment.example_query_imputation.join.JoinConstructionVariant.JoinConstructionVariant
+import de.hpi.dataset_versioning.data.diff.semantic.TupleMatcher
 import de.hpi.dataset_versioning.data.metadata.custom.joinability.`export`.Column
-import de.hpi.dataset_versioning.data.diff.TupleMatcher
 import de.hpi.dataset_versioning.data.metadata.custom.{ColumnCustomMetadata, CustomMetadata}
 import de.hpi.dataset_versioning.data.parser.exceptions.SchemaMismatchException
-import de.hpi.dataset_versioning.experiment.example_query_imputation.join.JoinConstructionVariant
 import de.hpi.dataset_versioning.io.IOService
 import de.hpi.dataset_versioning.util.TableFormatter
 
@@ -106,16 +104,21 @@ class LoadedRelationalDataset(val id:String, val version:LocalDate, val rows:Arr
     newRow
   }
 
-  def join(other: LoadedRelationalDataset, myJoinColIndex: Short, otherJoinColIndex: Short, variant:JoinConstructionVariant):LoadedRelationalDataset = {
-    if(variant!=JoinConstructionVariant.KeepBoth)
-      throw new AssertionError(s"$variant no longer supported ")
+  /***
+   * the Join that keeps both join columns
+   * @param other
+   * @param myJoinColIndex
+   * @param otherJoinColIndex
+   * @return
+   */
+  def join(other: LoadedRelationalDataset, myJoinColIndex: Short, otherJoinColIndex: Short):LoadedRelationalDataset = {
     val myJoinCol = colNames(myJoinColIndex)
     val otherJoinCol = other.colNames(otherJoinColIndex)
     val joinDataset = new LoadedRelationalDataset(id + s"_joinedOn($myJoinCol,$otherJoinCol)_with_" +other.id ,version)
     val newColumnOrder = (colNames.zipWithIndex.map{case (a,b) => (a,b,this)}
       ++ other.colNames.zipWithIndex.map{case (a,b) => (a,b,other)})
-        .sortBy(_._1)
-    joinDataset.colNames = newColumnOrder.map(_._1)
+        .sortBy(t => t._3.id + "." + t._1)
+    joinDataset.colNames = newColumnOrder.map(t => t._3.id + "." + t._1)
     joinDataset.colNameSet = joinDataset.colNames.toSet
     joinDataset.erroneous = erroneous || other.erroneous
     joinDataset.containsArrays = containsArrays || other.containsArrays

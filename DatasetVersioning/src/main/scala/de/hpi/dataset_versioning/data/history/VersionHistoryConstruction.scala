@@ -4,9 +4,9 @@ import java.io.{File, PrintWriter}
 import java.time.LocalDate
 
 import com.typesafe.scalalogging.StrictLogging
+import de.hpi.dataset_versioning.data.diff.syntactic.DiffManager
 import de.hpi.dataset_versioning.data.metadata.custom.joinability.`export`.SnapshotDiff
 import de.hpi.dataset_versioning.io.IOService
-import de.hpi.dataset_versioning.io.diff.DiffManager
 
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer

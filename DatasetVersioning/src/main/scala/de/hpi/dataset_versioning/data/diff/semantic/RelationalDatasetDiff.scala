@@ -1,6 +1,6 @@
 package de.hpi.dataset_versioning.data.diff.semantic
 
-import com.google.gson.JsonElement
+import com.google.gson.{JsonElement, JsonNull}
 import com.typesafe.scalalogging.StrictLogging
 import de.hpi.dataset_versioning.data.LoadedRelationalDataset
 import de.hpi.dataset_versioning.util.TableFormatter
@@ -13,6 +13,60 @@ class RelationalDatasetDiff(val unchanged: mutable.HashSet[Set[(String, JsonElem
                             val updates:mutable.HashMap[Set[(String, JsonElement)],Set[(String, JsonElement)]],
                             var schemaChange: SchemaChange = new SchemaChange,
                             var incomplete:Boolean=false) extends StrictLogging{
+
+  def generalizedJaccardDistance(a: Seq[String], b: Seq[String]) = {
+    a.intersect(b).size / (a.size + b.size).toDouble
+  }
+
+  def multiSetContainment[A](a: Seq[A], b: Seq[A]) = {
+    a.intersect(b).size / Math.max(a.size,b.size).toDouble
+  }
+
+  def diffSchemaSimilarity(other: RelationalDatasetDiff) = {
+    val insertsA = schemaChange.columnInsert.getOrElse(Seq())
+    val insertsB = other.schemaChange.columnInsert.getOrElse(Seq())
+    multiSetContainment(insertsA,insertsB)
+  }
+
+  def newValueSimilarity(other: RelationalDatasetDiff): Double = {
+    val myNewValues = inserts.toSeq.flatMap(_.toSeq.map(_._2)) ++ updates.toSeq.flatMap(_._2.toSeq.map(_._2))
+    val otherNewValues = other.inserts.toSeq.flatMap(_.toSeq.map(_._2)) ++ other.updates.toSeq.flatMap(_._2.toSeq.map(_._2))
+    multiSetContainment(myNewValues,otherNewValues)
+  }
+
+  def deletedValueSimilarity(other: RelationalDatasetDiff): Double = {
+    val myDeletedValues = deletes.toSeq.flatMap(_.toSeq.map(_._2)) ++ updates.toSeq.flatMap(_._1.toSeq.map(_._2))
+    val otherDeletedValues = other.deletes.toSeq.flatMap(_.toSeq.map(_._2)) ++ other.updates.toSeq.flatMap(_._1.toSeq.map(_._2))
+    multiSetContainment(myDeletedValues,otherDeletedValues)
+  }
+
+  def fieldUpdateSimilarity(other: RelationalDatasetDiff): Double = {
+    val myUpdates = getOldToNewValueUpdates
+    val otherUpdates = other.getOldToNewValueUpdates
+    multiSetContainment(myUpdates,otherUpdates)
+  }
+
+  private def getOldToNewValueUpdates = {
+    updates.toSeq.flatMap { case (t1, t2) => {
+      val oldFieldMap = t1.toMap
+      val newFieldMap = t1.toMap
+      //let's assume for now that there was no schema change
+      val fieldNameIntersection = oldFieldMap.keySet.union(newFieldMap.keySet)
+      val valueUpdates = fieldNameIntersection.toSeq.map(fieldKey => {
+        (oldFieldMap.getOrElse(fieldKey, JsonNull.INSTANCE), newFieldMap.getOrElse(fieldKey, JsonNull.INSTANCE))
+      })
+      valueUpdates
+    }
+    }
+  }
+
+  def calculateDiffSimilarity(other:RelationalDatasetDiff) = {
+    DiffSimilarity(diffSchemaSimilarity(other),
+      newValueSimilarity(other),
+      deletedValueSimilarity(other),
+      fieldUpdateSimilarity(other)
+    )
+  }
 
   def getAsTableString(rows: scala.collection.Set[Set[(String, JsonElement)]]) = {
     if(rows.isEmpty)

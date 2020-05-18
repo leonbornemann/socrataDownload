@@ -12,6 +12,10 @@ import scala.io.Source
 
 class DatasetHTMLExporter() {
 
+  val idToLineageMap = IOService.readCleanedDatasetLineages()
+    .map(l => (l.id,l))
+    .toMap
+
   def exportDiffMetadataToHTMLPrinter(ds1: LoadedRelationalDataset,ds2:LoadedRelationalDataset, pr: PrintWriter) = {
     IOService.cacheMetadata(ds1.version)
     IOService.cacheMetadata(ds2.version)
@@ -19,9 +23,15 @@ class DatasetHTMLExporter() {
     val md2 = IOService.cachedMetadata(ds2.version)(ds2.id)
     //opening Div:
     pr.println("<p><div style=\"width:100%;overflow:auto;height:200px\">")
-    //ID:
+    //ID and lineage size
     pr.println("<b>ID: </b>")
     pr.println(escapeHTML(s"${ds1.id}"))
+    pr.println("&emsp;")
+    pr.println("<b>#Changes: </b>")
+    pr.println(escapeHTML(s"${idToLineageMap(ds1.id).versionsWithChanges.size}"))
+    pr.println("&emsp;")
+    pr.println("<b>#Deletions: </b>")
+    pr.println(escapeHTML(s"${idToLineageMap(ds1.id).deletions.size}"))
     pr.println("<br/>")
     //Version:
     //pr.println("<p><div style=\"width:100%;overflow:auto;\">")
@@ -163,12 +173,36 @@ class DatasetHTMLExporter() {
     pr.close()
   }
 
+  def exportCorrelationInfoToHTMLPrinter(dp: ChangeCorrelationInfo, pr: PrintWriter) = {
+    pr.println("<b>A: </b>")
+    pr.println(escapeHTML(s"${dp.idA}"))
+    pr.println("<b>P(A): </b>")
+    pr.println(escapeHTML(s"${dp.P_A}"))
+    pr.println("&emsp;")
+    pr.println("<b>B: </b>")
+    pr.println(escapeHTML(s"${dp.idB}"))
+    pr.println("<b>P(B): </b>")
+    pr.println(escapeHTML(s"${dp.P_B}"))
+    pr.println("<br>")
+    pr.println("<b>(B AND B): </b>")
+    pr.println(escapeHTML(s"${dp.P_A_AND_B}"))
+    pr.println("&emsp;")
+    pr.println("<b>P(A|B): </b>")
+    pr.println(escapeHTML(s"${dp.P_A_IF_B}"))
+    pr.println("&emsp;")
+    pr.println("<b>P(B|A): </b>")
+    pr.println(escapeHTML(s"${dp.P_B_IF_A}"))
+    pr.println("<br>")
+
+  }
+
   def exportDiffPairToTableView(dsABeforeChange: LoadedRelationalDataset,
                                 dsAAfterChange: LoadedRelationalDataset,
                                 diffA: RelationalDatasetDiff,
                                 dsBBeforeChange: LoadedRelationalDataset,
                                 dsBAfterChange: LoadedRelationalDataset,
                                 diffB: RelationalDatasetDiff,
+                                dp:ChangeCorrelationInfo,
                                 outFile: File) = {
     val template = "/html_output_templates/ScrollableTableTemplateForJointDiff.html"
     val pr = new PrintWriter(outFile)
@@ -177,6 +211,8 @@ class DatasetHTMLExporter() {
       .getLines()
       .foreach( l => {
         if(l.trim.startsWith("????")){
+          if(l.contains("CORRELATIONMETAINFO"))
+            exportCorrelationInfoToHTMLPrinter(dp,pr)
           if(l.contains("METAINFO1"))
             exportDiffMetadataToHTMLPrinter(dsABeforeChange,dsAAfterChange,pr)
           else if(l.contains("TABLECONTENT1"))

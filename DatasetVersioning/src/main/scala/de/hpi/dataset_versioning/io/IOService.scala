@@ -30,7 +30,6 @@ object IOService extends StrictLogging{
     cachedCustomMetadata((STANDARD_TIME_FRAME_START,STANDARD_TIME_FRAME_END))
   }
 
-
   def getJoinCandidateFile() = {
     new File(EXPORT_DIR).mkdirs()
     new File(EXPORT_DIR + "join_candidates.csv")
@@ -53,13 +52,11 @@ object IOService extends StrictLogging{
     files
   }
 
-
   def shouldBeCheckpoint(version: LocalDate): Boolean = {
     val checkpoints = getCheckpoints
     val firstVersion = checkpoints(0)
     version ==firstVersion || ChronoUnit.DAYS.between(firstVersion,version) % 7==0
   }
-
 
   var socrataDir:String = null
   val dateTimeFormatter = DateTimeFormatter.ISO_LOCAL_DATE

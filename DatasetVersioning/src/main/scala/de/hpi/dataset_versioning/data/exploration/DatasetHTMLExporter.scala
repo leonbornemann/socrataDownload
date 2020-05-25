@@ -2,15 +2,21 @@ package de.hpi.dataset_versioning.data.exploration
 
 import java.io.{File, PrintWriter}
 
-import com.google.gson.JsonElement
+import com.google.gson.{JsonElement, JsonPrimitive}
 import de.hpi.dataset_versioning.data.LoadedRelationalDataset
-import de.hpi.dataset_versioning.data.diff.semantic.RelationalDatasetDiff
+import de.hpi.dataset_versioning.data.diff.semantic.{DiffSimilarity, RelationalDatasetDiff}
 import de.hpi.dataset_versioning.io.IOService
 
 import scala.collection.mutable
 import scala.io.Source
 
 class DatasetHTMLExporter() {
+
+  val diffStyleDelete = "<div style=\"color:red;text-decoration:line-through;resize:none;\">"
+  val diffStyleInsert = "<div style=\"color:green;resize:none;\">"
+  val diffStyleUpdate = "<div style=\"color:blue;resize:none;\">"
+  val diffStyleValuesInBoth = "<div style=\"color:gold;resize:none;\">"
+  val diffStyleNormal = "<div style=\"resize:none;\">"
 
   val idToLineageMap = IOService.readCleanedDatasetLineages()
     .map(l => (l.id,l))
@@ -27,10 +33,10 @@ class DatasetHTMLExporter() {
     pr.println("<b>ID: </b>")
     pr.println(escapeHTML(s"${ds1.id}"))
     pr.println("&emsp;")
-    pr.println("<b>#Changes: </b>")
+    pr.println("<b>#VersionsOfDataset: </b>")
     pr.println(escapeHTML(s"${idToLineageMap(ds1.id).versionsWithChanges.size}"))
     pr.println("&emsp;")
-    pr.println("<b>#Deletions: </b>")
+    pr.println("<b>#DeletionsOfDataset: </b>")
     pr.println(escapeHTML(s"${idToLineageMap(ds1.id).deletions.size}"))
     pr.println("<br/>")
     //Version:
@@ -59,7 +65,7 @@ class DatasetHTMLExporter() {
     pr.println("</div></p>")
   }
 
-  def exportDiffToHTMLPrinter(dsBeforeChange: LoadedRelationalDataset, dsAfterChange: LoadedRelationalDataset, diff: RelationalDatasetDiff, pr: PrintWriter) = {
+  def exportDiffToHTMLPrinter(dsBeforeChange: LoadedRelationalDataset, dsAfterChange: LoadedRelationalDataset, diff: RelationalDatasetDiff,diffOverlap:DiffSimilarity, pr: PrintWriter) = {
     //very simple schema based col-matching
     val colDeletes = dsBeforeChange.colNames.toSet.diff(dsAfterChange.colNames.toSet)
     val colInserts = dsAfterChange.colNames.toSet.diff(dsBeforeChange.colNames.toSet)
@@ -67,10 +73,6 @@ class DatasetHTMLExporter() {
     val resultColSet = dsBeforeChange.colNames.toSet.union(dsAfterChange.colNames.toSet)
         .toIndexedSeq
         .sorted
-    val diffStyleDelete = "<div style=\"color:red;text-decoration:line-through;resize:none;\">"
-    val diffStyleInsert = "<div style=\"color:green;resize:none;\">"
-    val diffStyleUpdate = "<div style=\"color:blue;resize:none;\">"
-    val diffStyleNormal = "<div style=\"resize:none;\">"
     pr.println("<tr>")
     resultColSet.foreach(cell => {
       if(colMatches.contains(cell)) {
@@ -92,16 +94,16 @@ class DatasetHTMLExporter() {
     val resultingColOrder = resultColSet.zipWithIndex.toMap
     //TODO: think about tuple order?
     //deleted first! - then inserts - then updates
-    addToHTMLTable(diff.deletes, diffStyleDelete, resultingColOrder,pr)
-    addToHTMLTable(diff.inserts, diffStyleInsert, resultingColOrder,pr)
-    addUpdatedTuplesToHTMLTable(diff.updates, diffStyleUpdate,diffStyleInsert,diffStyleDelete,diffStyleNormal,resultingColOrder,pr)
-    addToHTMLTable(diff.unchanged,diffStyleNormal,resultingColOrder,pr)
-
+    addUpdatedTuplesToHTMLTable(diff.updates,resultingColOrder,diffOverlap,pr)
+    addToHTMLTable(diff.inserts, diffStyleInsert, resultingColOrder,diffOverlap,pr)
+    addToHTMLTable(diff.deletes, diffStyleDelete, resultingColOrder,diffOverlap,pr)
+    addToHTMLTable(diff.unchanged.take(10),diffStyleNormal,resultingColOrder,diffOverlap,pr)
+    val dummyRow:mutable.HashSet[Set[(String, JsonElement)]] = mutable.HashSet(resultingColOrder.keySet.map(t => (t, new JsonPrimitive("..."))))
+    addToHTMLTable(dummyRow,diffStyleNormal,resultingColOrder,diffOverlap,pr)
   }
 
   def addUpdatedTuplesToHTMLTable(updates: mutable.HashMap[Set[(String, JsonElement)], Set[(String, JsonElement)]],
-                                  diffStyleUpdate: String,diffStyleInsert:String,diffStyleDelete:String,
-                                  diffStyleNormal:String, resultingColOrder: Map[String, Int], pr: PrintWriter) = {
+                                  resultingColOrder: Map[String, Int],diffOverleap:DiffSimilarity, pr: PrintWriter) = {
     updates.foreach { case(from,to) => {
       val fromMap = from.toMap
       val toMap = to.toMap
@@ -109,25 +111,30 @@ class DatasetHTMLExporter() {
       val htmlCells = mutable.ArrayBuffer[String]() ++= Seq.fill[String](resultingColOrder.size)("-")
       resultingColOrder.foreach { case (cname, curCellIndex) => {
         var curCell = "-"
+        val intersectionDiffP = "<p style=\"color:gold;\">"
+        val sb = new mutable.StringBuilder()
+        sb.append("<td>")
         if(fromMap.contains(cname) && toMap.contains(cname)){
           //we have an update:
           val prevValue = fromMap(cname)
           val newValue = toMap(cname)
-          if(prevValue != newValue)
-            curCell = "<td>" + diffStyleUpdate + escapeHTML(LoadedRelationalDataset.getCellValueAsString(prevValue) + " --> " + LoadedRelationalDataset.getCellValueAsString(newValue)) + "</div></td>"
-          else
-            curCell = "<td>" + diffStyleNormal + escapeHTML(LoadedRelationalDataset.getCellValueAsString(prevValue)) + "</div></td>"
+          if(prevValue!=newValue) sb.append(diffStyleUpdate) else sb.append(diffStyleNormal)
+          appendFormattedOldCellValue(diffOverleap, intersectionDiffP, sb, prevValue)
+          sb.append(escapeHTML(" --> "))
+          appendFormattedNewValue(diffOverleap, intersectionDiffP, sb, newValue)
         } else if(fromMap.contains(cname)){
           val prevValue = fromMap(cname)
-          curCell = "<td>" + diffStyleDelete + escapeHTML(LoadedRelationalDataset.getCellValueAsString(prevValue)) + "</div></td>"
+          sb.append(diffStyleDelete)
+          appendFormattedOldCellValue(diffOverleap, intersectionDiffP, sb, prevValue)
         } else{
           assert(toMap.contains(cname))
           val newValue = toMap(cname)
-          curCell = "<td>" + diffStyleInsert + escapeHTML(LoadedRelationalDataset.getCellValueAsString(newValue)) + "</div></td>"
+          appendFormattedNewValue(diffOverleap, intersectionDiffP, sb, newValue)
         }
+        sb.append("</div></td>")
+        curCell = sb.toString()
         htmlCells(curCellIndex) = curCell
-      }
-      }
+      }}
       htmlCells.foreach(c => {
         pr.println(c)
       })
@@ -137,14 +144,37 @@ class DatasetHTMLExporter() {
 
   }
 
-  private def addToHTMLTable(rows:  mutable.HashSet[Set[(String, JsonElement)]], diffStyle: String, resultingColOrder: Map[String, Int], pr:PrintWriter) = {
+  private def appendFormattedOldCellValue(diffOverleap: DiffSimilarity, intersectionDiffP: String, sb: StringBuilder, prevValue: JsonElement) = {
+    if (diffOverleap.oldValueOverlap.contains(prevValue))
+      sb.append(intersectionDiffP)
+    sb.append(escapeHTML(LoadedRelationalDataset.getCellValueAsString(prevValue)))
+    if (diffOverleap.oldValueOverlap.contains(prevValue))
+      sb.append("</p>")
+  }
+
+  private def appendFormattedNewValue(diffOverleap: DiffSimilarity, intersectionDiffP: String, sb: StringBuilder, newValue: JsonElement) = {
+    if (diffOverleap.newValueOverlap.contains(newValue))
+      sb.append(intersectionDiffP)
+    sb.append(escapeHTML(LoadedRelationalDataset.getCellValueAsString(newValue)))
+    if (diffOverleap.newValueOverlap.contains(newValue))
+      sb.append("</p>")
+  }
+
+  private def addToHTMLTable(rows:  mutable.HashSet[Set[(String, JsonElement)]], standardDiffStyle: String, resultingColOrder: Map[String, Int], diffOverlap:DiffSimilarity, pr:PrintWriter) = {
     rows.foreach { tupleSet => {
       pr.println("<tr>")
       val htmlCells = mutable.ArrayBuffer[String]() ++= Seq.fill[String](resultingColOrder.size)("-")
       tupleSet.foreach { case (cname, e) => {
         val curCellIndex = resultingColOrder(cname)
-        val curCell = "<td>" + diffStyle + escapeHTML(LoadedRelationalDataset.getCellValueAsString(e)) + "</div></td>"
-        htmlCells(curCellIndex) = curCell
+        val cell = new mutable.StringBuilder()
+        cell.append("<td>" + standardDiffStyle)
+        if(diffOverlap.newValueOverlap.contains(e) || diffOverlap.oldValueOverlap.contains(e))
+          cell.append("<p style=\"color:gold;\">")
+        cell.append(escapeHTML(LoadedRelationalDataset.getCellValueAsString(e)))
+        if(diffOverlap.newValueOverlap.contains(e) || diffOverlap.oldValueOverlap.contains(e))
+          cell.append("</p>")
+        cell.append("</div></td>")
+        htmlCells(curCellIndex) = cell.toString()
       }
       }
       htmlCells.foreach(c => {
@@ -166,34 +196,48 @@ class DatasetHTMLExporter() {
           if(l.contains("METAINFO"))
             exportDiffMetadataToHTMLPrinter(dsBeforeChange,dsAfterChange,pr)
           else if(l.contains("TABLECONTENT"))
-            exportDiffToHTMLPrinter(dsBeforeChange,dsAfterChange,diff,pr)
+            exportDiffToHTMLPrinter(dsBeforeChange,dsAfterChange,diff,DiffSimilarity(),pr)
         } else
           pr.println(l)
       })
     pr.close()
   }
 
-  def exportCorrelationInfoToHTMLPrinter(dp: ChangeCorrelationInfo, pr: PrintWriter) = {
-    pr.println("<b>A: </b>")
-    pr.println(escapeHTML(s"${dp.idA}"))
-    pr.println("<b>P(A): </b>")
-    pr.println(escapeHTML(s"${dp.P_A}"))
-    pr.println("&emsp;")
-    pr.println("<b>B: </b>")
-    pr.println(escapeHTML(s"${dp.idB}"))
-    pr.println("<b>P(B): </b>")
-    pr.println(escapeHTML(s"${dp.P_B}"))
-    pr.println("<br>")
-    pr.println("<b>(B AND B): </b>")
-    pr.println(escapeHTML(s"${dp.P_A_AND_B}"))
-    pr.println("&emsp;")
-    pr.println("<b>P(A|B): </b>")
-    pr.println(escapeHTML(s"${dp.P_A_IF_B}"))
-    pr.println("&emsp;")
-    pr.println("<b>P(B|A): </b>")
-    pr.println(escapeHTML(s"${dp.P_B_IF_A}"))
-    pr.println("<br>")
+  def exportCorrelationInfoToHTMLPrinter(dp: ChangeCorrelationInfo,idLeft:String, diffSimilarity:DiffSimilarity, pr: PrintWriter) = {
+    pr.println("<table>")
+    pr.println("<tr>")
+    addValueToTableCell("Top-Level Domain:  ",dp.domain, pr)
+    if(idLeft==dp.idA){
+      //a before b
+      addValueToTableCell("A: ",dp.idA, pr)
+      addValueToTableCell("P(A): ",dp.P_A, pr)
+    }
+    addValueToTableCell("B: ",dp.idB, pr)
+    addValueToTableCell("P(B): ",dp.P_B, pr)
+    if(idLeft!=dp.idA){
+      //b before A
+      addValueToTableCell("A: ",dp.idA, pr)
+      addValueToTableCell("P(A): ",dp.P_A, pr)
+    }
+    pr.println("<table>")
+    pr.println("<tr>")
+    addValueToTableCell("P(A AND B): ",dp.P_A_AND_B, pr)
+    addValueToTableCell("P(A|B): ",dp.P_A_IF_B, pr)
+    addValueToTableCell("P(B|A): ",dp.P_B_IF_A, pr)
+    //diff similarities:
+    addValueToTableCell("PSchemaChangeSim: ",diffSimilarity.schemaSimilarity, pr)
+    addValueToTableCell("NewValSim: ",diffSimilarity.newValueSimilarity, pr)
+    addValueToTableCell("DeletedValSim: ",diffSimilarity.deletedValueSimilarity, pr)
+    addValueToTableCell("UpdateSim: ",diffSimilarity.fieldUpdateSimilarity, pr)
+    pr.println("</tr>")
+    pr.println("</table>")
+  }
 
+  private def addValueToTableCell(vDescription:String,v: Any, pr: PrintWriter) = {
+    pr.println("<td>")
+    pr.println(s"<b>${escapeHTML(vDescription)}</b>")
+    pr.println(escapeHTML(s"$v"))
+    pr.println("</td>")
   }
 
   def exportDiffPairToTableView(dsABeforeChange: LoadedRelationalDataset,
@@ -203,6 +247,7 @@ class DatasetHTMLExporter() {
                                 dsBAfterChange: LoadedRelationalDataset,
                                 diffB: RelationalDatasetDiff,
                                 dp:ChangeCorrelationInfo,
+                                diffSimilarity:DiffSimilarity,
                                 outFile: File) = {
     val template = "/html_output_templates/ScrollableTableTemplateForJointDiff.html"
     val pr = new PrintWriter(outFile)
@@ -212,15 +257,15 @@ class DatasetHTMLExporter() {
       .foreach( l => {
         if(l.trim.startsWith("????")){
           if(l.contains("CORRELATIONMETAINFO"))
-            exportCorrelationInfoToHTMLPrinter(dp,pr)
+            exportCorrelationInfoToHTMLPrinter(dp,dsAAfterChange.id,diffSimilarity,pr)
           if(l.contains("METAINFO1"))
             exportDiffMetadataToHTMLPrinter(dsABeforeChange,dsAAfterChange,pr)
           else if(l.contains("TABLECONTENT1"))
-            exportDiffToHTMLPrinter(dsABeforeChange,dsAAfterChange,diffA,pr)
+            exportDiffToHTMLPrinter(dsABeforeChange,dsAAfterChange,diffA,diffSimilarity,pr)
           if(l.contains("METAINFO2"))
             exportDiffMetadataToHTMLPrinter(dsBBeforeChange,dsBAfterChange,pr)
           else if(l.contains("TABLECONTENT2"))
-            exportDiffToHTMLPrinter(dsBBeforeChange,dsBAfterChange,diffB,pr)
+            exportDiffToHTMLPrinter(dsBBeforeChange,dsBAfterChange,diffB,diffSimilarity,pr)
         } else
           pr.println(l)
       })

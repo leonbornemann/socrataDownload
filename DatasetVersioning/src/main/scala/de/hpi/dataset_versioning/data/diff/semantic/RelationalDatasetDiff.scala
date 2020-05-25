@@ -19,31 +19,17 @@ class RelationalDatasetDiff(val unchanged: mutable.HashSet[Set[(String, JsonElem
   }
 
   def multiSetContainment[A](a: Seq[A], b: Seq[A]) = {
-    a.intersect(b).size / Math.max(a.size,b.size).toDouble
+    if(Math.max(a.size,b.size)==0)
+      0.0
+    else {
+      a.intersect(b).size / Math.max(a.size,b.size).toDouble
+    }
   }
 
   def diffSchemaSimilarity(other: RelationalDatasetDiff) = {
     val insertsA = schemaChange.columnInsert.getOrElse(Seq())
     val insertsB = other.schemaChange.columnInsert.getOrElse(Seq())
     multiSetContainment(insertsA,insertsB)
-  }
-
-  def newValueSimilarity(other: RelationalDatasetDiff): Double = {
-    val myNewValues = inserts.toSeq.flatMap(_.toSeq.map(_._2)) ++ updates.toSeq.flatMap(_._2.toSeq.map(_._2))
-    val otherNewValues = other.inserts.toSeq.flatMap(_.toSeq.map(_._2)) ++ other.updates.toSeq.flatMap(_._2.toSeq.map(_._2))
-    multiSetContainment(myNewValues,otherNewValues)
-  }
-
-  def deletedValueSimilarity(other: RelationalDatasetDiff): Double = {
-    val myDeletedValues = deletes.toSeq.flatMap(_.toSeq.map(_._2)) ++ updates.toSeq.flatMap(_._1.toSeq.map(_._2))
-    val otherDeletedValues = other.deletes.toSeq.flatMap(_.toSeq.map(_._2)) ++ other.updates.toSeq.flatMap(_._1.toSeq.map(_._2))
-    multiSetContainment(myDeletedValues,otherDeletedValues)
-  }
-
-  def fieldUpdateSimilarity(other: RelationalDatasetDiff): Double = {
-    val myUpdates = getOldToNewValueUpdates
-    val otherUpdates = other.getOldToNewValueUpdates
-    multiSetContainment(myUpdates,otherUpdates)
   }
 
   private def getOldToNewValueUpdates = {
@@ -55,16 +41,25 @@ class RelationalDatasetDiff(val unchanged: mutable.HashSet[Set[(String, JsonElem
       val valueUpdates = fieldNameIntersection.toSeq.map(fieldKey => {
         (oldFieldMap.getOrElse(fieldKey, JsonNull.INSTANCE), newFieldMap.getOrElse(fieldKey, JsonNull.INSTANCE))
       })
+          .filter(t => t._1!=t._2)
       valueUpdates
     }
     }
   }
 
   def calculateDiffSimilarity(other:RelationalDatasetDiff) = {
+    val myUpdates = getOldToNewValueUpdates
+    val otherUpdates = other.getOldToNewValueUpdates
+    val myNewValues = inserts.toSeq.flatMap(_.toSeq.map(_._2)) ++ myUpdates.map(_._2)
+    val otherNewValues = other.inserts.toSeq.flatMap(_.toSeq.map(_._2)) ++ otherUpdates.map(_._2)
+    val myDeletedValues = deletes.toSeq.flatMap(_.toSeq.map(_._2)) ++ myUpdates.map(_._1)
+    val otherDeletedValues = other.deletes.toSeq.flatMap(_.toSeq.map(_._2)) ++ otherUpdates.map(_._1)
     DiffSimilarity(diffSchemaSimilarity(other),
-      newValueSimilarity(other),
-      deletedValueSimilarity(other),
-      fieldUpdateSimilarity(other)
+      multiSetContainment(myNewValues,otherNewValues),
+      multiSetContainment(myDeletedValues,otherDeletedValues),
+      multiSetContainment(myUpdates,otherUpdates),
+      myNewValues.toSet.intersect(otherNewValues.toSet),
+      myDeletedValues.toSet.intersect(otherDeletedValues.toSet)
     )
   }
 

@@ -89,7 +89,7 @@ class LoadedRelationalDataset(val id:String, val version:LocalDate, val rows:Arr
 
   def extractCustomMetadata(intID:Int) = {
     calculateColumnMetadata()
-    CustomMetadata(id,intID,version,rows.size,getSchemaSpecificHashValue,getTupleSpecificHash,columnMetadata.toMap)
+    CustomMetadata(id,None,intID,version,rows.size,getSchemaSpecificHashValue,getTupleSpecificHash,columnMetadata.toMap)
   }
 
   def constructRow(r1: IndexedSeq[JsonElement], ds1: LoadedRelationalDataset, r2: IndexedSeq[JsonElement], ds2: LoadedRelationalDataset, newColumnOrder: IndexedSeq[(String, Int, LoadedRelationalDataset)]): IndexedSeq[JsonElement] = {

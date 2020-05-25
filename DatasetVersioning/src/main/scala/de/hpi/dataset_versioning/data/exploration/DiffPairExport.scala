@@ -19,6 +19,7 @@ object DiffPairExport extends App with StrictLogging{
   IOService.socrataDir = args(0)
   val sourceFile = args(1)
   val targetDir = args(2)
+  val md = IOService.getOrLoadCustomMetadataForStandardTimeFrame()
   val perPairCount = 3
   val sampleSize = 100
   var skippedBecauseTooLowSimilarityCount = 0
@@ -37,7 +38,7 @@ object DiffPairExport extends App with StrictLogging{
       .map(l => {
         val tokens = l.split(",")
         //c("A","B","P(A)","P(B)","P(A AND B)","P(A|B)","P(B|A)")
-        ChangeCorrelationInfo(tokens(0),tokens(1),tokens(2).toInt,tokens(3).toInt,tokens(4).toInt,tokens(5).toDouble,tokens(6).toDouble,tokens(7).toDouble)
+        ChangeCorrelationInfo(tokens(0),tokens(1),tokens(2),tokens(3).toInt,tokens(4).toInt,tokens(5).toInt,tokens(6).toDouble,tokens(7).toDouble,tokens(8).toDouble)
       })
     val allCorrelationsByDataaset = mutable.HashMap[String,mutable.ArrayBuffer[ChangeCorrelationInfo]]()
     datasetPairs.foreach(dp => {
@@ -59,7 +60,7 @@ object DiffPairExport extends App with StrictLogging{
         val (curCorrellatedDataset,correlationInfo) = byCorrelatedDataset.next()
         val lA = lineages(curDataset)
         val lB = lineages(curCorrellatedDataset)
-        val sharedChangeTimestamps = Random.shuffle(lA.versionsWithChanges.tail.intersect(lB.versionsWithChanges.tail))
+        val sharedChangeTimestamps = Random.shuffle(lA.versionsWithChanges.tail.intersect(lB.versionsWithChanges.tail)) //Seq(lA.versionsWithChanges.tail.intersect(lB.versionsWithChanges.tail).head)//
         //go through all shared timestamps:
         var i=0
         while(i< perPairCount && i<sharedChangeTimestamps.size){
@@ -107,6 +108,7 @@ object DiffPairExport extends App with StrictLogging{
         exporter.exportDiffPairToTableView(dsABeforeChange, dsAAfterChange, diffA,
           dsBBeforeChange, dsBAfterChange, diffB,
           correlationInfo,
+          similarity,
           new File(s"$targetDir/${lA.id}_AND_${lB.id}_$curDiffTimestamp.html"))
         true
       } else{
@@ -116,4 +118,4 @@ object DiffPairExport extends App with StrictLogging{
   }
 }
 
-case class ChangeCorrelationInfo(idA: String, idB: String,P_A: Int,P_B: Int, P_A_AND_B: Int, P_A_IF_B: Double, P_B_IF_A: Double,significance:Double)
+case class ChangeCorrelationInfo(domain:String,idA: String, idB: String,P_A: Int,P_B: Int, P_A_AND_B: Int, P_A_IF_B: Double, P_B_IF_A: Double,significance:Double)

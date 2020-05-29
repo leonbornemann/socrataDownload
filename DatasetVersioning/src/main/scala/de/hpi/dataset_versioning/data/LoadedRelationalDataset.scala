@@ -329,6 +329,29 @@ class LoadedRelationalDataset(val id:String, val version:LocalDate, val rows:Arr
 
   def ncols = colNames.size
 
+  def getNumberFromCell(value: JsonPrimitive): Any = {
+    val num = value.getAsString
+    val isFloat = num.matches("[-+]?[0-9]*\\.[0-9]+")
+    if (isFloat) value.getAsDouble
+    else BigInt(value.getAsBigInteger)
+  }
+
+  def getCellValue(c: JsonElement): Any = {
+    if(c.isJsonNull) null
+    else if(c.isJsonPrimitive && c.getAsJsonPrimitive.isBoolean) c.getAsBoolean
+    else if(c.isJsonPrimitive && c.getAsJsonPrimitive.isNumber) getNumberFromCell(c.getAsJsonPrimitive)
+    else if(c.isJsonPrimitive && c.getAsJsonPrimitive.isString) c.getAsString
+    else throw new AssertionError("matching incomplete")
+  }
+
+  def toImproved = {
+    val improvedDataset = simplified.RelationalDataset(id,
+      version,
+      colNames,
+      rows.map(r => simplified.RelationalDatasetRow(-1,r.map(c => getCellValue(c)))))
+    improvedDataset
+  }
+
 }
 object LoadedRelationalDataset {
   val NULL_VALUE = ""

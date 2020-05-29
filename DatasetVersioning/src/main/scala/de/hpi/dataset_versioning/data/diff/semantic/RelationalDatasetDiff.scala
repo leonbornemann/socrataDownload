@@ -14,6 +14,16 @@ class RelationalDatasetDiff(val unchanged: mutable.HashSet[Set[(String, JsonElem
                             var schemaChange: SchemaChange = new SchemaChange,
                             var incomplete:Boolean=false) extends StrictLogging{
 
+  def calculateChangeMetrics() = {
+    val unchangedMap = unchanged.map(_.toMap)
+    val insertsMap = inserts.map(_.toMap)
+    val deletesMap = deletes.map(_.toMap)
+    val updatesMap = updates.map(t => (t._1.toMap,t._2.toMap))
+    //val rcs = unchangedMap.map()
+    //val metrics = new DatasetChangeMetrics()
+    //TODO:later
+  }
+
   def generalizedJaccardDistance(a: Seq[String], b: Seq[String]) = {
     a.intersect(b).size / (a.size + b.size).toDouble
   }
